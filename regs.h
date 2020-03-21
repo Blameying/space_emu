@@ -2,23 +2,21 @@
 #define __REGS_H__
 
 #include <stdint.h>
+#include "riscv_definations.h"
 
-#define XLEN 32
-
-#if XLEN == 32
-typedef int32_t  int_t;
-typedef uint32_t uint_t;
-#else
-typedef int64_t  int_t;
-typedef uint64_t uint_t;
-#endif
 
 typedef struct
 {
-  uint_t regs[32];
   uint_t pc;
+  uint_t regs[32];
   
   uint8_t xlen;
+  uint8_t power_down_flag;
+  uint8_t priv;
+  uint64_t cycles;
+
+  int pending_exception;
+  uint_t pending_tval;
   
   uint_t mstatus;
   uint_t mtvec;
@@ -26,7 +24,7 @@ typedef struct
   uint_t mepc;
   uint_t mcause;
   uint_t mtval;
-  uint_t mhartio;
+  uint_t mhartid;
 
   uint32_t misa;
   uint32_t mie;
@@ -41,8 +39,6 @@ typedef struct
   uint_t scause;
   uint_t stval;
 
-  uint32_t priv;
-
 #if XLEN == 32
   uint32_t satp;
 #else 
@@ -52,4 +48,10 @@ typedef struct
 } cpu_state_t;
 
 extern cpu_state_t cpu_state;
+extern int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write);
+extern int csr_write(cpu_state_t *state, uint32_t csr, uint_t val);
+extern void set_priv(cpu_state_t *state,int priv)
+extern void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval)
+extern void handle_sret(cpu_state_t *state)
+extern void handle_mret(cpu_state_t *state)
 #endif

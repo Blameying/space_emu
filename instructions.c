@@ -132,6 +132,78 @@ void decode_inst(uint32_t inst)
         }
       }
       break;
+#if XLEN >= 64
+    case OP_IMM32:
+      {
+        uint_t val = 0;
+        switch(funct3)
+        {
+          case 0: /* addiw */
+            val = (int32_t)(val + imm_I);
+            break;
+          case 1: /* slliw */
+            if ((imm_I & ~31) != 0)
+             goto ERROR_PROCESS;
+            val = (int32_t)(val << (imm_I & 31));
+            break;
+          case 5: /* srliw/sraiw */
+            if ((imm_I & ~(31 | 0x400)) != 0)
+              goto ERROR_PROCESS;
+            if (imm_I & 0x400)
+              val = (int32_t)val >> (imm_I & 31);
+            else
+              val = (int32_t)((uint32_t)val >> (imm_I & 31));
+            break;
+          default:
+            goto ERROR_PROCESS;
+        }
+        if (rd != 0)
+          cpu_state.regs[rd] = val;
+      }
+      break;
+    case OP_32:
+      {
+        uint_t val1 = cpu_state.regs[rs1];
+        uint_t val2 = cpu_state.regs[rs2];
+        switch(funct7)
+        {
+          case 0:
+            switch(funct3)
+            {
+              case 0: /* addw */
+                val1 = (int32_t)(val1 + val2);
+                break;
+              case 1: /* sllw */
+                val1 = (int32_t)((uint32_t)val1 << (val2 & 31));
+                break;
+              case 5: /* srlw */
+                val1 = (int32_t)((uint32_t)val1 >> (val2 & 31));
+                break;
+              default:
+                goto ERROR_PROCESS;
+            }
+            break;
+          case 0x20:
+            switch(funt3)
+            {
+              case 0: /* subw */
+                val1 = (int32_t)(val1 - val2);
+                break;
+              case 5: /* sraw */
+                val1 = (int32_t)val1 >> (val2 & 31);
+                break;
+              default:
+                goto ERROR_PROCESS;
+            }
+            break;
+          default:
+            goto ERROR_PROCESS;
+        }
+        if (rd != 0)
+          cpu_state.regs[rd] = val1;
+      }
+      break;
+#endif
     case OP_STORE:
       {
         uint_t addr = cpu_state.regs[rs1] + imm_S;
@@ -141,11 +213,15 @@ void decode_inst(uint32_t inst)
           case 0: /* sb */
             iomap_manager.write(addr, 1, (uint8_t*)&val2);
             break;
-          case 1: /* sw */
+          case 1: /* sh */
             iomap_manager.write(addr, 2, (uint8_t*)&val2);
             break;
-          case 2: /* sh */
+          case 2: /* sw */
             iomap_manager.write(addr, 4, (uint8_t*)&val2);
+            break;
+#if XLEN >= 64
+          case 3: /* sd */
+            iomap_manager.write(addr, sizeof(uint64_t), (uint8_t*)&val2);
             break;
           default:
             goto ERROR_PROCESS;
@@ -193,6 +269,14 @@ void decode_inst(uint32_t inst)
               val = ret;
             }
             break;
+#if XLEN >= 64
+          case 0x3: /* ld */
+            {
+              uint64_t ret = 0;
+              iomap_manager.read(addr, sizeof(ret), (uint8_t*)&ret):
+              val = (int64_t)ret;
+            }
+            break;
           case 0x6: /* lwu */
             {
               uint32_t ret = 0;
@@ -200,6 +284,7 @@ void decode_inst(uint32_t inst)
               val = ret;
             }
             break;
+#endif
           default:
             goto ERROR_PROCESS;
         }
@@ -267,16 +352,175 @@ void decode_inst(uint32_t inst)
       }
       break;
     case OP_SYSTEM:
-
-
-
-
+      switch(funct3)
+      {
+        case 0:
+          switch(imm_I)
+          {
+            case 0: /* ecall */
+              if (inst & 0x000FFF80)
+                goto ERROR_PROCESS;
+              cpu_state.pending_exception = CAUSE_USER_ECALL + cpu_state.priv;
+              goto Exception;
+            case 1: /* ebreak */
+              if (inst & 0x000FFF80)
+                goto ERROR_PROCESS;
+              cpu_state.pending_exception = CAUSE_BREAKPOINT;
+              goto Exception;
+            default:
+              goto ERROR_PROCESS;
+          }
+        case 1: /* csrrw */
+          {
+            uint_t value = 0;
+            int error = 0;
+            if (csr_read(&cpu_state, &value, imm_I, true))
+              goto ERROR_PROCESS;
+            value = (int_t)value;
+            error = csr_write(&cpu_state, imm_I, cpu_state.regs[rs1]);
+            if (error < 0)
+              goto ERROR_PROCESS;
+            if (rd != 0)
+              cpu_state.regs[rd] = value;
+            if (error > 0)
+            {
+              cpu_state->pc += 4;
+              if (error == 2)
+                goto JUMP;
+              else
+                goto DONE_INTERP;
+            }
+          }
+          break;
+        case 2: /* csrrs */
+        case 3: /* csrrc */
+          {
+            uint_t value = 0;
+            uint_t value2 = cpu_state.regs[rs1];
+            int error = 0;
+            if (csr_read(&cpu_state, &value, imm_I, (rs1 != 0)))
+              goto ERROR_PROCESS;
+            value = (int_t)(value);
+            if (rs1 != 0)
+            {
+              if (funct3 == 2)
+                value2 = value | value2;
+              else
+                value2 = value & ~value2;
+              error = csr_write(&cpu_state, imm_I, value2);
+              if (error < 0)
+                goto ERROR_PROCESS;
+            }
+            else
+            {
+              error = 0;
+            }
+            if (rd != 0)
+              cpu_state.regs[rd] = value;
+            if (error > 0)
+            {
+              cpu_state->pc += 4;
+              if (error == 2)
+                goto JUMP;
+              else
+                goto DONE_INTERP;
+            }
+          }
+          break;
+        case 5: /* csrrwi */
+          {
+            uint_t value = 0;
+            int error = 0;
+            if (csr_read(&cpu_state, &value, imm_I, true))
+              goto ERROR_PROCESS;
+            value = (int_t)value;
+            error = csr_write(&cpu_state, imm_I, rs1);
+            if (error < 0)
+              goto ERROR_PROCESS;
+            if (rd != 0)
+              cpu_state.regs[rd] = value;
+            if (error > 0)
+            {
+              cpu_state->pc += 4;
+              if (error == 2)
+                goto JUMP;
+              else
+                goto DONE_INTERP;
+            }
+          }
+          break;
+        case 6: /* csrrsi */
+        case 7: /* csrrci */
+          {
+            uint_t value = 0;
+            uint_t value2 = rs1;
+            int error = 0;
+            if (csr_read(&cpu_state, &value, imm_I, (rs1 != 0)))
+              goto ERROR_PROCESS;
+            value = (int_t)(value);
+            if (rs1 != 0)
+            {
+              if (funct3 == 2)
+                value2 = value | value2;
+              else
+                value2 = value & ~value2;
+              error = csr_write(&cpu_state, imm_I, value2);
+              if (error < 0)
+                goto ERROR_PROCESS;
+            }
+            else
+            {
+              error = 0;
+            }
+            if (rd != 0)
+              cpu_state.regs[rd] = value;
+            if (error > 0)
+            {
+              cpu_state->pc += 4;
+              if (error == 2)
+                goto JUMP;
+              else
+                goto DONE_INTERP;
+            }
+          }
+          break;
+        default:
+          goto ERROR_PROCESS;
+      }
+      break;
+    case OP_FENCE:
+      switch(funct3)
+      {
+        case 0: /* fence */
+          if (inst & 0xF00FFF80)
+            goto ERROR_PROCESS;
+          break;
+        case 1: /* fence.i */
+          if (inst != 0x0000100F)
+            goto ERROR_PROCESS;
+          break;
+        default:
+          goto ERROR_PROCESS;
+      }
+      break;
+    default:
+      goto ERROR_PROCESS;
   }
+  cpu_state.pc += 4;
+  return;
 
 ERROR_PROCESS:
-  printf("Error instructions decode! \n");
+  printf("Error instructions decode! %x\n", inst);
+  cpu_state.pending_exception = CAUSE_ILLEGAL_INSTRUCTION;
+  cpu_state.pending_tval = inst;
 
-
+Exception:
+  if (cpu_state->pending_exception >= 0)
+  {
+    raise_exception(&cpu_state, cpu_state.pending_exception, cpu_state.pending_tval);
+  }
+DONE_INTERP:
 JUMP:
   printf("jump instruction \n");
+  return;
 }
