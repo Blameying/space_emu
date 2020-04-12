@@ -1,10 +1,9 @@
 #ifndef __MEMORY_H__
 #define __MEMORY_H__
 
-#include "test.h"
-#define MEMORY_SIZE 256
+#include "regs.h"
+#define MEMORY_SIZE (256 * (1 << 20))
 
-extern void memory_init(void);
+extern void memory_module_init(cpu_state_t *state);
 
-extern test_entity_t memory_test;
 #endif

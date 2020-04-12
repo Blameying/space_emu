@@ -1,5 +1,4 @@
 #include "regs.h"
-#include "cpu.h"
 #include "riscv_definations.h"
 
 cpu_state_t cpu_state;
@@ -34,21 +33,10 @@ int get_base_from_xlen(int xlen)
         return 3;
 }
 
-uint_t get_sstatus(cpu_state_t *state, uint_t mask)
-{
-  uint_t result = 0;
-  result = state & SSTATUS_MASK & mask;
-  bool sd = ((result & MSTATUS_FS) == MSTATUS_FS) |
-       ((result & MSTATUS_XS) == MSTATUS_XS);
-  if (sd)
-    result |= (uint_t)1 << (state->xlen - 1);
-  return result;
-}
-
 uint_t get_mstatus(cpu_state_t *state, uint_t mask)
 {
   uint_t result = 0;
-  result = state & mask;
+  result = state->mstatus & mask;
   bool sd = ((result & MSTATUS_FS) == MSTATUS_FS) |
        ((result & MSTATUS_XS) == MSTATUS_XS);
   if (sd)
@@ -64,23 +52,22 @@ void set_mstatus(cpu_state_t *state, uint_t value)
       ((state->mstatus & MSTATUS_MPRV) && (diff & MSTATUS_MPP) != 0))
   {
     //TODO: tlb flush
-    void(diff);
+    (void)diff;
   }
   mask = MSTATUS_MASK & ~MSTATUS_FS;
 #if XLEN >= 64
   {
     int uxl, sxl;
-    uxl = (val >> MSTATUS_UXL_SHIFT) & 3;
+    uxl = (value >> MSTATUS_UXL_SHIFT) & 3;
     if (uxl >= 1 && uxl <= get_base_from_xlen(XLEN))
         mask |= MSTATUS_UXL_MASK;
-    sxl = (val >> MSTATUS_UXL_SHIFT) & 3;
+    sxl = (value >> MSTATUS_UXL_SHIFT) & 3;
     if (sxl >= 1 && sxl <= get_base_from_xlen(XLEN))
         mask |= MSTATUS_SXL_MASK;
   }
 #endif
-  state->mstatus = (state->mstatus & ~mask) | (value & mask) 
+  state->mstatus = (state->mstatus & ~mask) | (value & mask); 
 }
-
 
 int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
 {
@@ -140,7 +127,7 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
       break;
 
     case 0x100: /* sstatus */
-      val = get_sstatus(state, (uint_t)-1);
+      val = get_mstatus(state, SSTATUS_MASK);
       break;
     case 0x104: /* sie */
       val = state->mie & state->mideleg;
@@ -164,16 +151,17 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
       val = state->stval;
       break;
     case 0x144: /* sip */
-      val = s->mip & s->mideleg;
+      val = state->mip & state->mideleg;
       break;
     case 0x180: /* satp */
-      val = s->satp;
+      val = state->satp;
       break;
     case 0x300: /* mstatus */
-      val = get_mstatus(state, (uint_t)-1);
+      val = get_mstatus(state, MSTATUS_MASK);
       break;
     case 0x301: /* misa */
       val = state->misa;
+      val |= (uint_t)state->mxl << (state->xlen - 2);
       break;
     case 0x302: /* medeleg */
       val = state->medeleg;
@@ -237,10 +225,10 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       break;
     case 0x104: /* sie */
       mask = state->mideleg;
-      state->mie = (s->mie & ~mask) | (val & mask);
+      state->mie = (state->mie & ~mask) | (val & mask);
       break;
     case 105:   /* stvec */
-      state->stvec = val & ~3;
+      state->stvec = val;
       break;
     case 0x106: /* scounteren */
       state->scounteren = val & COUNTEREN_MASK;
@@ -258,7 +246,7 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       state->stval = val;
       break;
     case 0x144: /* sip */
-      mask = s->mideleg;
+      mask = state->mideleg;
       state->mip = (state->mip & ~mask) | (val & mask);
       break;
     case 0x180: /* satp */
@@ -290,7 +278,7 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
 #if XLEN >= 64
       {
         int new_mxl;
-        new_mxl = (val >> (s->xlen - 2)) & 3;
+        new_mxl = (val >> (state->xlen - 2)) & 3;
         if (new_mxl >= 1 && new_mxl <= get_base_from_xlen(XLEN)) 
         {
           /* Note: misa is only modified in M level, so cur_xlen
@@ -311,14 +299,14 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       break;
     case 0x303: /* mideleg */
       mask = (MIP_SSIP | MIP_STIP | MIP_SEIP);
-      s->mideleg = (s->mideleg & ~mask) | (val & mask);
+      state->mideleg = (state->mideleg & ~mask) | (val & mask);
       break;
     case 0x304: /* mie */
       mask = MIP_MSIP | MIP_MTIP | MIP_SSIP | MIP_STIP | MIP_SEIP;
       state->mie = (state->mie & ~mask) | (val & mask);
       break;
     case 0x305: /* mtvec */
-      state->mtvec = val & ~3;
+      state->mtvec = val;
       break;
     case 0x306: /* mcounteren */
       state->mcounteren = val & COUNTEREN_MASK;
@@ -337,7 +325,7 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       break;
     case 0x344: /* mip */
       mask = MIP_SSIP | MIP_STIP;
-      state->mip = (s->mip & ~mask) | (val & mask);
+      state->mip = (state->mip & ~mask) | (val & mask);
       break;
     default:
       return -1;
@@ -358,7 +346,7 @@ void set_priv(cpu_state_t *state,int priv)
       else if (priv == PRIV_U)
         mxl = (state->mstatus >> MSTATUS_UXL_SHIFT) & 3;
       else
-        mxl = get_base_from_xlen(XLEN);
+        mxl = state->mxl;
       state->xlen = 1 << (4 + mxl);
     }
 #endif
@@ -397,7 +385,15 @@ void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval)
       (state->priv << MSTATUS_SPP_SHIFT);
     state->mstatus &= ~MSTATUS_SIE;
     set_priv(state, PRIV_S);
-    state->pc = state->stvec;
+    /* check stvec mode */
+    if ((cause & CAUSE_INTERRUPT) && (state->stvec & 0x3))
+    {
+      state->pc = (state->stvec & ~0x3) + (cause & ~CAUSE_INTERRUPT) * 4;
+    }
+    else
+    {
+      state->pc = state->stvec & ~0x3;
+    }
   }
   else
   {
@@ -410,8 +406,64 @@ void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval)
       (state->priv << MSTATUS_MPP_SHIFT);
     state->mstatus &= ~MSTATUS_MIE;
     set_priv(state, PRIV_M);
-    state->pc = state->mtvec;
+    /* check mtvec mode */
+    if ((cause & CAUSE_INTERRUPT) && (state->mtvec & 0x3))
+    {
+      state->pc = (state->mtvec & ~0x3) + (cause & ~CAUSE_INTERRUPT) * 4;
+    }
+    else
+    {
+      state->pc = state->mtvec & ~0x3;
+    }
   }
+}
+
+static uint32_t get_pending_irq_mask(cpu_state_t *state)
+{
+  uint32_t pending_ints, enabled_ints;
+
+  pending_ints = state->mie & state->mip;
+  if (pending_ints == 0)
+    return 0;
+  enabled_ints = 0;
+  switch(state->priv)
+  {
+    case PRIV_M:
+      if (state->mstatus & MSTATUS_MIE)
+        enabled_ints = ~state->mideleg;
+      break;
+    case PRIV_S:
+      enabled_ints = ~state->mideleg;
+      if (state->mstatus & MSTATUS_SIE)
+        enabled_ints |= state->mideleg;
+      break;
+    default:
+    case PRIV_U:
+      enabled_ints = -1;
+      break;
+  }
+  return pending_ints & enabled_ints;
+}
+
+int raise_interrupt(cpu_state_t *state)
+{
+  uint32_t mask = 0;
+  int irq_num = 32;
+  int i = 0;
+
+  mask = get_pending_irq_mask(state);
+  if (mask == 0)
+    return 0;
+  for (i = 0; i < 32; i++)
+  {
+    if ((mask >> i) & 1)
+    {
+      irq_num = i;
+      break;
+    }
+  } 
+  raise_exception(state, irq_num | CAUSE_INTERRUPT, 0);
+  return -1;
 }
 
 void handle_sret(cpu_state_t *state)
@@ -437,5 +489,4 @@ void handle_mret(cpu_state_t *state)
   set_priv(state, mpp);
   state->pc = state->mepc;
 }
-
 

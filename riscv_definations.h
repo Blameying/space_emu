@@ -1,8 +1,9 @@
 #ifndef __RISCV_DEFINATIONS__
 #define __RISCV_DEFINATIONS__
 
-typedef _int128 int128_t;
-typedef unsigned _int128 uint128_t;
+#include <stdint.h>
+
+#define XLEN 64
 
 #if XLEN == 32
 typedef int32_t  int_t;
@@ -10,11 +11,8 @@ typedef uint32_t uint_t;
 #elif XLEN == 64
 typedef int64_t  int_t;
 typedef uint64_t uint_t;
-#elif XLEN == 128
-typedef int128_t int_t;
-typedef uint128_t uint_t;
 #else
-#error unsupported MAX_XLEN
+//#error "unsupported XLEN"
 #endif
 
 #ifndef BOOL
@@ -108,4 +106,30 @@ typedef int bool;
 #define MIP_SEIP (1 << 9)
 #define MIP_HEIP (1 << 10)
 #define MIP_MEIP (1 << 11)
+
+#define PTE_V_MASK (1 << 0)
+#define PTE_U_MASK (1 << 4)
+#define PTE_A_MASK (1 << 6)
+#define PTE_D_MASK (1 << 7)
+#define PTE_R_MASK (1 << 1)
+#define PTE_W_MASK (1 << 2)
+#define PTE_X_MASK (1 << 3)
+
+#define LOW_RAM_SIZE   0x00010000 /* 64KB */
+#define RAM_BASE_ADDR  0x80000000
+#define CLINT_BASE_ADDR 0x02000000
+#define CLINT_SIZE      0x000c0000
+#define HTIF_BASE_ADDR 0x40008000
+#define HTIF_SIZE      16
+#define IDE_BASE_ADDR  0x40009000
+#define VIRTIO_BASE_ADDR 0x40010000
+#define VIRTIO_SIZE      0x1000
+#define VIRTIO_IRQ       1
+#define PLIC_BASE_ADDR 0x40100000
+#define PLIC_SIZE      0x00400000
+#define FRAMEBUFFER_BASE_ADDR 0x41000000
+
+#define RTC_FREQ 10000000
+#define RTC_FREQ_DIV 16 /* arbitrary, relative to CPU freq to have a
+                           10 MHz frequency */
 #endif

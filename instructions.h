@@ -13,6 +13,7 @@
 #define OP_IMM32 0x1B
 #define OP_32 0x3B
 #define OP_BRANCH 0x63
-#define OP_FENCE 0x0F;
+#define OP_FENCE 0x0F
 
+extern void machine_loop();
 #endif
