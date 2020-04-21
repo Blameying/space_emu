@@ -404,14 +404,18 @@ int build_fdt(cpu_state_t *state, uint8_t *dst, uint64_t kernel_start, uint64_t 
   fdt_prop_u32(fdt_s, "phandle", plic_handler);
   fdt_end_node(fdt_s); /* plic */
 
-  fdt_begin_node_num(fdt_s, "virtio", VIRTIO_BASE_ADDR + 0 * VIRTIO_SIZE);
-  fdt_prop_str(fdt_s, "compatible", "virtio,mmio");
-  fdt_prop_tab_u64_2(fdt_s, "reg", VIRTIO_BASE_ADDR + 0 * VIRTIO_SIZE,
-                     VIRTIO_SIZE);
-  tab[0] = plic_handler;
-  tab[1] = VIRTIO_IRQ;
-  fdt_prop_tab_u32(fdt_s, "interrupts-extended", tab, 2);
-  fdt_end_node(fdt_s); /* virtio */
+  for(i = 0; i < 2; i++)
+  {
+    fdt_begin_node_num(fdt_s, "virtio", VIRTIO_BASE_ADDR + i * VIRTIO_SIZE);
+    fdt_prop_str(fdt_s, "compatible", "virtio,mmio");
+    fdt_prop_tab_u64_2(fdt_s, "reg", VIRTIO_BASE_ADDR + i * VIRTIO_SIZE,
+        VIRTIO_SIZE);
+    tab[0] = plic_handler;
+    tab[1] = VIRTIO_IRQ + i;
+    fdt_prop_tab_u32(fdt_s, "interrupts-extended", tab, 2);
+    fdt_end_node(fdt_s); /* virtio */
+  }
+
   fdt_end_node(fdt_s); /* soc */
 
   fdt_begin_node(fdt_s, "chosen");

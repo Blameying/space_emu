@@ -32,7 +32,7 @@ void plic_set_irq(cpu_state_t *state, int irq_num, int flag)
 
 static int plic_init(address_item_t *handler)
 {
-  return 0;
+  return true;
 }
 
 static int_t plic_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)

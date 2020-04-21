@@ -1,5 +1,6 @@
 #include "virtio_block_device.h"
 #include "virtio_interface.h"
+#include "machine.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -171,6 +172,7 @@ void virtual_block_device_init(cpu_state_t *state, const char *filename, block_d
   {
     ptr[i] = nb_sectors >> (i * 8);
   }
+  riscv_machine.block = vbd;
 
   return;
 }

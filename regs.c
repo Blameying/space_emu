@@ -1,5 +1,7 @@
 #include "regs.h"
 #include "riscv_definations.h"
+#include <stdio.h>
+#include "clint.h"
 
 cpu_state_t cpu_state;
 
@@ -178,6 +180,9 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
     case 0x306: /* mcounteren */
       val = state->mcounteren;
       break;
+    case 0x3A0 ... 0x3BF: /* pmpaddr0 */
+      val = 0;
+      break;
     case 0x340: /* mscratch */
       val = state->mscratch;
       break;
@@ -208,6 +213,7 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
       break;
     default:
       illegal_instruction:
+      printf("csr read error, csr address: 0x%016x\n", csr);
       *pval = 0;
       return -1;
   }
@@ -311,6 +317,8 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
     case 0x306: /* mcounteren */
       state->mcounteren = val & COUNTEREN_MASK;
       break;
+    case 0x3A0 ... 0x3BF: /* pmp */
+      break;
     case 0x340: /* mscratch */
       state->mscratch = val;
       break;
@@ -328,6 +336,7 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       state->mip = (state->mip & ~mask) | (val & mask);
       break;
     default:
+      printf("csr write error, csr address: 0x%016x\n", csr);
       return -1;
   }
   return 0;;
@@ -490,3 +499,27 @@ void handle_mret(cpu_state_t *state)
   state->pc = state->mepc;
 }
 
+int machine_get_sleep_duration(cpu_state_t *state, int delay)
+{
+  int64_t delay1;
+
+  if (!(get_mip(state) & MIP_MTIP))
+  {
+    delay1 = state->mtimecmp - rtc_get_time(state);
+    if (delay1 <= 0)
+    {
+      set_mip(state, MIP_MTIP);
+      delay = 0;
+    }
+    else
+    {
+      delay1 = delay1 / (RTC_FREQ / 1000);
+      if (delay1 < delay)
+        delay = delay1;
+    }
+  }
+  if (!state->power_down_flag)
+    delay = 0;
+
+  return delay;
+}

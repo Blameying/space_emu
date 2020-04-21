@@ -77,6 +77,8 @@ struct cpu_state
   uint64_t satp;
 #endif
   uint32_t scounteren;
+
+  uint_t load_res;
 };
 
 extern cpu_state_t cpu_state;
@@ -94,6 +96,7 @@ extern void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval);
 extern void handle_sret(cpu_state_t *state);
 extern void handle_mret(cpu_state_t *state);
 extern int raise_interrupt(cpu_state_t *state);
+extern int machine_get_sleep_duration(cpu_state_t *state, int delay);
 static inline void set_mip(cpu_state_t* state, uint32_t mask)
 {
   state->mip |= mask;

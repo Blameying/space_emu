@@ -31,7 +31,7 @@ static void htif_cmd_handler(cpu_state_t *state)
   }
   else
   {
-    printf("HTIF: unsupported tohost=0x%016x\n", state->htif_tohost);
+    printf("HTIF: unsupported tohost=0x%016lx\n", state->htif_tohost);
   }
 }
 

@@ -9,12 +9,14 @@
 #include "fdt.h"
 #include "virtio_interface.h"
 #include "virtio_block_device.h"
+#include "console.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include "machine.h"
 
-const char *bios_path = "./images/bbl64.bin";
-const char *kernel_path = "./images/kernel-riscv64.bin";
-const char *device = "./images/root-riscv64.bin";
+const char *bios_path = "./images/bbl.bin";
+const char *kernel_path = "./images/kernel.bin";
+const char *device = "./images/rootfs.ext2";
 const char *cmdline = "root=/dev/vda rw";
 
 #define BIOS_INDEX 0
@@ -60,6 +62,7 @@ void cpu_state_reset()
   cpu_state.xlen = XLEN;
   cpu_state.mxl = get_base_from_xlen(XLEN);
   cpu_state.priv = PRIV_M;
+  cpu_state.pending_exception = -1;
   cpu_state.mstatus = ((uint64_t)get_base_from_xlen(XLEN) << MSTATUS_UXL_SHIFT) |
     ((uint64_t)get_base_from_xlen(XLEN) << MSTATUS_SXL_SHIFT);
   cpu_state.misa |= MCPUID_SUPER | MCPUID_USER | MCPUID_I | MCPUID_M |MCPUID_A;
@@ -121,7 +124,9 @@ static void copy_bios(cpu_state_t *state, const uint8_t *buf, int buf_len,
 
 int main()
 {
+  FILE *log_file = fopen(".log", "w");
   cpu_state_reset();  
+  riscv_machine.cpu_state = &cpu_state;
   load_file(bios_path, &pfs[BIOS_INDEX]);
   load_file(kernel_path, &pfs[KERNEL_INDEX]);
   memory_module_init(&cpu_state);
@@ -143,14 +148,17 @@ int main()
   bus->addr = VIRTIO_BASE_ADDR;
   bus->irq = &cpu_state.plic_irq[irq_num++];
   virtual_block_device_init(&cpu_state, device, BF_MODE_SNAPSHOT, bus);
+
   /* change addr and irq for next devie */
   bus->addr += VIRTIO_SIZE;
   bus->irq = &cpu_state.plic_irq[irq_num++];
+  virtual_console_device_init(&cpu_state, bus);
 
   copy_bios(&cpu_state, pfs[BIOS_INDEX].buf, pfs[BIOS_INDEX].size, pfs[KERNEL_INDEX].buf, pfs[KERNEL_INDEX].size, cmdline);
 
   while(1)
   {
+    fprintf(log_file, "0x%064lx\n", cpu_state.pc);
     machine_loop();
   }
   

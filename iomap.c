@@ -198,11 +198,11 @@ static int address_translate(cpu_state_t *state, uint_t inst, uint32_t access, u
 {
 #if XLEN == 32
    uint32_t mode = (state->satp >> 31) & 0x1;
-   uint32_t asid = (state->satp >> 22) & 0x1FF;
+   //uint32_t asid = (state->satp >> 22) & 0x1FF;
    uint_t ppn = state->satp & ((1 << 22) - 1);
 #elif XLEN >= 64
    uint32_t mode = (state->satp >> 60) & 0xF;
-   uint32_t asid = (state->satp >> 44) & 0xFFFF;
+   //uint32_t asid = (state->satp >> 44) & 0xFFFF;
    uint_t ppn = state->satp & (((uint64_t)1 << 44) - 1);
 #endif
    switch (mode)
@@ -276,33 +276,90 @@ static int_t read_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_
 {
   uint_t phy_address = 0;
   int flag = 0;
+  uint32_t page_mask = vaddress & PG_MASK;
+
   flag = address_translate(state, vaddress, PTE_R_MASK, &phy_address);
   if (flag < 0)
     return flag;
 
-  return iomap_manager.read(phy_address, size, dst);
+  if (phy_address == vaddress)
+  {
+    return iomap_manager.read(phy_address, size, dst);
+  }
+
+  if ((PG_MASK - page_mask + 1) >= size)
+  {
+    return iomap_manager.read(phy_address, size, dst);
+  }
+  else
+  {
+    uint32_t new_size = PG_MASK + 1 - page_mask; 
+    if (iomap_manager.read(phy_address, new_size, dst) < 0)
+      return -1;
+    vaddress += new_size;
+    dst += new_size;
+    return read_vaddr(state, vaddress, size - new_size, dst);
+  }
 }
 
 static int_t write_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_t *src)
 {
   uint_t phy_address = 0;
   int flag = 0;
+  uint32_t page_mask = vaddress & PG_MASK;
+
   flag = address_translate(state, vaddress, PTE_W_MASK, &phy_address);
   if (flag < 0)
     return flag;
 
-  return iomap_manager.write(phy_address, size, src);
+  if (phy_address == vaddress)
+  {
+    return iomap_manager.write(phy_address, size, src);
+  }
+
+  if ((PG_MASK - page_mask + 1) >= size)
+  {
+    return iomap_manager.write(phy_address, size, src);
+  }
+  else
+  {
+    uint32_t new_size = PG_MASK + 1 - page_mask; 
+    if (iomap_manager.write(phy_address, new_size, src) < 0)
+      return -1;
+    vaddress += new_size;
+    src += new_size;
+    return write_vaddr(state, vaddress, size - new_size, src);
+  }
 }
 
 static int_t code_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_t *dst)
 {
   uint_t phy_address = 0;
   int flag = 0;
+  uint32_t page_mask = vaddress & PG_MASK;
+
   flag = address_translate(state, vaddress, PTE_X_MASK, &phy_address);
   if (flag < 0)
     return flag;
 
-  return iomap_manager.read(phy_address, size, dst);
+  if (phy_address == vaddress)
+  {
+    return iomap_manager.read(phy_address, size, dst);
+  }
+
+  if ((PG_MASK - page_mask + 1) >= size)
+  {
+    return iomap_manager.read(phy_address, size, dst);
+  }
+  else
+  {
+    uint32_t new_size = PG_MASK + 1 - page_mask; 
+    if (iomap_manager.read(phy_address, new_size, dst) < 0)
+      return -1;
+    vaddress += new_size;
+    dst += new_size;
+    return code_vaddr(state, vaddress, size - new_size, dst);
+  }
 }
 
 static address_item_t *get_address_item(cpu_state_t *state, uint_t address)

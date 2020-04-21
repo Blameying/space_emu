@@ -14,7 +14,7 @@ static uint64_t rtc_get_real_time()
     (ts.tv_nsec / (1000000000 / RTC_FREQ));
 }
 
-static uint64_t rtc_get_time(cpu_state_t *state)
+uint64_t rtc_get_time(cpu_state_t *state)
 {
   return rtc_get_real_time() - state->rtc_start_time;
 }

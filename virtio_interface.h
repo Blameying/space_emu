@@ -147,11 +147,18 @@ typedef struct
   irq_signal_t *irq;
 } virtual_io_bus_t;
 
+extern bool virtio_console_can_write_data(virtual_io_device_t *dev);
 extern int virtual_block_recv_request(virtual_io_device_t *device, int queue_idx,
+    int desc_idx, int read_size, int write_size);
+extern int virtio_console_recv_request(virtual_io_device_t * dev, int queue_idx,
     int desc_idx, int read_size, int write_size);
 extern void virtio_init(cpu_state_t *state, address_item_t *handler,
     virtual_io_device_t *device,
     virtual_io_bus_t *bus, uint32_t device_id, 
     int config_space_size,
     virtual_io_device_recieve_func *device_recv);
+
+extern int virtio_console_get_write_len(virtual_io_device_t *dev);
+extern int virtio_console_write_data(virtual_io_device_t *dev, const uint8_t *buf, int buf_len);
+extern void virtio_console_resize_event(virtual_io_device_t *dev, int width, int height);
 #endif

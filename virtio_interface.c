@@ -1,5 +1,6 @@
 #include "virtio_interface.h"
 #include "virtio_block_device.h"
+#include "console.h"
 #include "riscv_definations.h"
 #include "iomap.h"
 #include "regs.h"
@@ -140,13 +141,13 @@ static int virtual_memcpy_to_from_queue(virtual_io_device_t *device, uint8_t *bu
   return 0;
 }
 
-static int virtual_memcpy_to_queue(virtual_io_device_t *device,
+int virtual_memcpy_to_queue(virtual_io_device_t *device,
     int queue_idx, int desc_idx, int offset, const void *buf, int count)
 {
   return virtual_memcpy_to_from_queue(device, (void*)buf, queue_idx, desc_idx, offset, count, true);
 }
 
-static int virtual_memcpy_from_queue(virtual_io_device_t *device, void *buf,
+int virtual_memcpy_from_queue(virtual_io_device_t *device, void *buf,
     int queue_idx, int desc_idx, int offset, int count)
 {
   return virtual_memcpy_to_from_queue(device, buf, queue_idx, desc_idx, offset, count, false);
@@ -490,9 +491,11 @@ int_t virtual_mmio_write(address_item_t *handler, uint8_t *src, uint_t size, uin
         break;
     }
   }
+
+  return size;
 }
 
-static void virtual_consume_desc(virtual_io_device_t *device, int queue_idx, int desc_idx, int desc_len)
+void virtual_consume_desc(virtual_io_device_t *device, int queue_idx, int desc_idx, int desc_len)
 {
   queue_state_t *qs = &device->queue[queue_idx];
   uint64_t addr;
@@ -616,6 +619,95 @@ int virtual_block_recv_request(virtual_io_device_t *device, int queue_idx,
   }
 
   return 0;
+}
+
+/* console */
+int virtio_console_recv_request(virtual_io_device_t * dev, int queue_idx, int desc_idx,
+    int read_size, int write_size)
+{
+  virtio_console_device_t *dev1 = (virtio_console_device_t*)dev;
+  character_device_t *cs = dev1->cs;
+  uint8_t *buf;
+
+  if (queue_idx == 1)
+  {
+    buf = malloc(read_size);
+    virtual_memcpy_from_queue(dev, buf, queue_idx, desc_idx, 0, read_size);
+    cs->write_data(cs->opaque, buf, read_size);
+    free(buf);
+    virtual_consume_desc(dev, queue_idx, desc_idx, 0);
+  }
+  return 0;
+}
+
+int virtio_console_get_write_len(virtual_io_device_t *dev)
+{
+  int queue_idx = 0;
+  queue_state_t *qs = &dev->queue[queue_idx];
+  int desc_idx;
+  int read_size, write_size;
+  uint16_t avail_idx;
+  
+  if (!qs->ready)
+    return 0;
+  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  if (qs->last_avail_idx == avail_idx)
+    return 0;
+  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 4 + \
+                          (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
+  if (get_desc_rw_size(dev->cpu_state, dev, &read_size, &write_size, queue_idx, desc_idx))
+  {
+    return 0;
+  }
+
+  return write_size;
+}
+
+bool virtio_console_can_write_data(virtual_io_device_t *dev)
+{
+  queue_state_t *qs = &dev->queue[0];
+  uint16_t avail_idx;
+
+  if (!qs->ready)
+  {
+    return false;
+  }
+  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  return qs->last_avail_idx != avail_idx;
+}
+
+int virtio_console_write_data(virtual_io_device_t *dev, const uint8_t *buf, int buf_len)
+{
+  int queue_idx = 0;
+  queue_state_t *qs = &dev->queue[queue_idx];
+  int desc_idx;
+  uint16_t avail_idx;
+
+  if (!qs->ready)
+    return 0;
+  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  if (qs->last_avail_idx == avail_idx)
+    return 0;
+  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 4 + \
+                           (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
+  virtual_memcpy_to_queue(dev, queue_idx, desc_idx, 0, buf, buf_len);
+  virtual_consume_desc(dev, queue_idx, desc_idx, buf_len);
+  qs->last_avail_idx++;
+
+  return buf_len;
+}
+
+void virtio_console_resize_event(virtual_io_device_t *dev, int width, int height)
+{
+  uint8_t *ptr = dev->config_space + 0;  
+  ptr[0] = width;
+  ptr[1] = width >> 8;
+  ptr = dev->config_space + 2;
+  ptr[0] = height;
+  ptr[1] = height >> 8;
+
+  dev->int_status |= 2;
+  set_irq(dev->irq, 1);
 }
 
 void virtio_init(cpu_state_t *state, address_item_t *handler,
