@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define XLEN 64
+#define FLEN 64
 
 #if XLEN == 32
 typedef int32_t  int_t;
@@ -13,6 +14,18 @@ typedef int64_t  int_t;
 typedef uint64_t uint_t;
 #else
 //#error "unsupported XLEN"
+#endif
+
+/* float instructions support macro */
+#if FLEN > 0
+#if FLEN == 32
+typedef uint32_t fp_uint;
+#define F32_HIGH 0
+#elif FLEN == 64
+typedef uint64_t fp_uint;
+#define F32_HIGH ((fp_uint)-1 << 32)
+#define F64_HIGH 0
+#endif
 #endif
 
 #ifndef BOOL

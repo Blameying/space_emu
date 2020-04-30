@@ -30,10 +30,17 @@ struct cpu_state
 {
   uint_t pc;
   uint_t regs[32];
+
+#if FLEN > 0
+  fp_uint fp_reg[32];
+  uint32_t fflags; /* fcsr [0:4] */
+  uint8_t  frm;    /* fcsr [5:7] */
+#endif
   
   uint8_t xlen;
   uint8_t power_down_flag;
   uint8_t priv;
+  uint8_t fs; /* mstatus [12:13] 2 bits FS field */
   uint8_t mxl;
   uint64_t cycles;
   /* clint */

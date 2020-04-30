@@ -38,7 +38,7 @@ int get_base_from_xlen(int xlen)
 uint_t get_mstatus(cpu_state_t *state, uint_t mask)
 {
   uint_t result = 0;
-  result = state->mstatus & mask;
+  result = (state->mstatus | (state->fs << MSTATUS_FS_SHIFT)) & mask;
   bool sd = ((result & MSTATUS_FS) == MSTATUS_FS) |
        ((result & MSTATUS_XS) == MSTATUS_XS);
   if (sd)
@@ -56,6 +56,7 @@ void set_mstatus(cpu_state_t *state, uint_t value)
     //TODO: tlb flush
     (void)diff;
   }
+  state->fs = (value >> MSTATUS_FS_SHIFT) & 3;
   mask = MSTATUS_MASK & ~MSTATUS_FS;
 #if XLEN >= 64
   {
@@ -71,6 +72,15 @@ void set_mstatus(cpu_state_t *state, uint_t value)
   state->mstatus = (state->mstatus & ~mask) | (value & mask); 
 }
 
+#if FLEN > 0
+static void set_frm(cpu_state_t *state, uint_t val)
+{
+  if (val >= 5)
+    val = 0;
+  state->frm = val;
+}
+#endif
+
 int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
 {
   uint_t val = 0;
@@ -85,6 +95,23 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
 
   switch (csr)
   {
+#if FLEN > 0
+    case 0x001: /* fflags */
+      if (state->fs == 0)
+        return -1;
+      val = state->fflags;
+      break;
+    case 0x002: /* frm */
+      if (state->fs == 0)
+        return -1;
+      val = state->frm;
+      break;
+    case 0x003:
+      if (state->fs == 0)
+        return -1;
+      val = state->fflags | (state->frm << 5);
+      break;
+#endif
     case 0xC00: /* ucycle */
     case 0xC02: /* uinstret */
       {
@@ -226,6 +253,17 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
   uint_t mask = 0;
   switch(csr)
   {
+#if FLEN > 0
+    case 0x001: /* fflags */
+      state->fflags = val & 0x1F;
+      state->fs = 3;
+      break;
+    case 0x002: /* frm */
+      set_frm(state, val & 7);
+      state->fflags = val & 0x1f;
+      state->fs = 3;
+      break;
+#endif
     case 0x100: /* sstatus */
       set_mstatus(state, (state->mstatus & ~SSTATUS_MASK) | (val & SSTATUS_MASK));
       break;

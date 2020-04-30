@@ -15,6 +15,13 @@
 #define OP_BRANCH 0x63
 #define OP_FENCE 0x0F
 #define OP_AMO 0x2F
+#define OP_FP_LOAD 0x07
+#define OP_FP_STORE 0x27
+#define OP_FP_FMADD 0x43
+#define OP_FP_FMSUB 0x47
+#define OP_FP_FNMSUB 0x4b
+#define OP_FP_FNMADD 0x4f
+#define OP_FP_NORMAL 0x53
 
 extern void machine_loop();
 #endif

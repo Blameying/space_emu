@@ -14,10 +14,10 @@
 #include <stdio.h>
 #include "machine.h"
 
-const char *bios_path = "./images/bbl.bin";
-const char *kernel_path = "./images/kernel.bin";
-const char *device = "./images/rootfs.ext2";
-const char *cmdline = "root=/dev/vda rw";
+const char *bios_path = "./images/bbl64.bin";
+const char *kernel_path = "./images/kernel-riscv64.bin";
+const char *device = "./images/root-riscv64.bin";
+const char *cmdline = "console=hvc0 root=/dev/vda rw";
 
 #define BIOS_INDEX 0
 #define KERNEL_INDEX 1
@@ -65,7 +65,13 @@ void cpu_state_reset()
   cpu_state.pending_exception = -1;
   cpu_state.mstatus = ((uint64_t)get_base_from_xlen(XLEN) << MSTATUS_UXL_SHIFT) |
     ((uint64_t)get_base_from_xlen(XLEN) << MSTATUS_SXL_SHIFT);
-  cpu_state.misa |= MCPUID_SUPER | MCPUID_USER | MCPUID_I | MCPUID_M |MCPUID_A;
+  cpu_state.misa |= MCPUID_SUPER | MCPUID_USER | MCPUID_I | MCPUID_M |MCPUID_A | MCPUID_C;
+#if FLEN >= 32
+  cpu_state.misa |= MCPUID_F;
+#endif
+#if FLEN >= 64
+  cpu_state.misa |= MCPUID_D;
+#endif
 }
 
 static void copy_bios(cpu_state_t *state, const uint8_t *buf, int buf_len,
