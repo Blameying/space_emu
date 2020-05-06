@@ -13,6 +13,7 @@ static int check_valid(uint_t max, uint_t size)
 
 static int_t memory_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
 {
+  uint_t origin_size = size;
   if (src == NULL || !check_valid(handler->size, (dst + size) - handler->start_address))
   {
     return -1;
@@ -25,11 +26,12 @@ static int_t memory_write(address_item_t *handler, uint8_t *src, uint_t size, ui
     *ptr++ = *src++;
   }
 
-  return size;
+  return origin_size;
 }
 
 static int_t memory_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
 {
+  uint_t origin_size = size;
   if (dst == NULL || !check_valid(handler->size, (src + size) - handler->start_address))
   {
     return -1;
@@ -42,7 +44,7 @@ static int_t memory_read(address_item_t *handler, uint_t src, uint_t size, uint8
     *dst++ = *ptr++;
   }
 
-  return size;
+  return origin_size;
 }
 
 static int memory_init(address_item_t *handler)

@@ -132,6 +132,8 @@ typedef int bool;
 #define RAM_BASE_ADDR  0x80000000
 #define CLINT_BASE_ADDR 0x02000000
 #define CLINT_SIZE      0x000c0000
+#define PRINT_DEVICE   0x40007000
+#define PRINT_SIZE     8
 #define HTIF_BASE_ADDR 0x40008000
 #define HTIF_SIZE      16
 #define IDE_BASE_ADDR  0x40009000

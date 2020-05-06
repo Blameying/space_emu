@@ -6,6 +6,7 @@
 #include "instructions.h"
 #include "iomap.h"
 #include "plic.h"
+#include "debug.h"
 #include "fdt.h"
 #include "virtio_interface.h"
 #include "virtio_block_device.h"
@@ -14,13 +15,14 @@
 #include <stdio.h>
 #include "machine.h"
 
-const char *bios_path = "./images/bbl64.bin";
+const char *bios_path = "./images/out.bin";
 const char *kernel_path = "./images/kernel-riscv64.bin";
 const char *device = "./images/root-riscv64.bin";
 const char *cmdline = "console=hvc0 root=/dev/vda rw";
 
 #define BIOS_INDEX 0
 #define KERNEL_INDEX 1
+#define BIN_INDEX 2
 
 typedef struct
 {
@@ -29,7 +31,7 @@ typedef struct
   uint8_t *buf;
 } preload_file_t;
 
-preload_file_t pfs[2] = {{"bios", 0, NULL}, {"kernel", 0, NULL}};
+preload_file_t pfs[3] = {{"bios", 0, NULL}, {"kernel", 0, NULL}, {"binary", 0, NULL}};
 
 static void load_file(const char *path, preload_file_t *pre)
 {
@@ -128,17 +130,50 @@ static void copy_bios(cpu_state_t *state, const uint8_t *buf, int buf_len,
   q[4] = 0x00028067; /* jalr zero, t0, jump_addr */
 }
 
-int main()
+static void copy_bin(cpu_state_t *state, const uint8_t *buf, int buf_len)
 {
-  FILE *log_file = fopen(".log", "w");
+  uint32_t *q;
+  address_item_t *item = iomap_manager.get_address_item(state, 0x1000);
+
+  if (buf_len > MEMORY_SIZE)
+  {
+    printf("binary file is too big.");
+    exit(0);
+  }
+
+  uint8_t *dst = NULL;
+  if (item && item->entity)
+  {
+    dst = item->entity;
+  }
+  else
+  {
+    printf("load binary failed\n");
+    exit(0);
+  }
+
+  iomap_manager.write(RAM_BASE_ADDR, buf_len, (uint8_t*)buf);
+
+  q = (uint32_t*)(dst + 0x1000);
+  q[0] = 0x297 + 0x80000000 - 0x1000; /* auipc t0, jump_addr */
+  q[1] = 0x00028067; /* jalr zero, t0, jump_addr */
+}
+
+int main(int argc, char *argv[])
+{
   cpu_state_reset();  
   riscv_machine.cpu_state = &cpu_state;
+  if (argc > 1)
+  {
+    load_file(argv[1], &pfs[BIN_INDEX]);
+  }
   load_file(bios_path, &pfs[BIOS_INDEX]);
   load_file(kernel_path, &pfs[KERNEL_INDEX]);
   memory_module_init(&cpu_state);
   clint_module_init(&cpu_state);
   htif_module_init(&cpu_state);
   plic_module_init(&cpu_state);
+  debug_module_init(&cpu_state);
   
   int i;
   for(i = 1; i < 32; i++)
@@ -160,11 +195,17 @@ int main()
   bus->irq = &cpu_state.plic_irq[irq_num++];
   virtual_console_device_init(&cpu_state, bus);
 
-  copy_bios(&cpu_state, pfs[BIOS_INDEX].buf, pfs[BIOS_INDEX].size, pfs[KERNEL_INDEX].buf, pfs[KERNEL_INDEX].size, cmdline);
+  if (argc > 1)
+  {
+    copy_bin(&cpu_state, pfs[BIN_INDEX].buf, pfs[BIN_INDEX].size);
+  }
+  else
+  {
+    copy_bios(&cpu_state, pfs[BIOS_INDEX].buf, pfs[BIOS_INDEX].size, pfs[KERNEL_INDEX].buf, pfs[KERNEL_INDEX].size, cmdline);
+  }
 
   while(1)
   {
-    fprintf(log_file, "0x%064lx\n", cpu_state.pc);
     machine_loop();
   }
   

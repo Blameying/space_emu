@@ -126,7 +126,7 @@ typedef struct pte_format
   uint_t pte_ppn_mask;
 } pte_format_t;
 
-static int translate_action(cpu_state_t *state, pte_format_t *ft, uint_t *result, int access)
+static int translate_action(cpu_state_t *state, pte_format_t *ft, uint_t *result, int access, int priv)
 {
   int i = 0;
   uint_t base = ft->ppn;
@@ -138,17 +138,17 @@ static int translate_action(cpu_state_t *state, pte_format_t *ft, uint_t *result
     uint_t pte_addr = base * ft->pagesize + ft->vpn[i] * ft->ptesize;
     iomap_manager.read(pte_addr, ft->ptesize, (uint8_t*)&pte);
     
-    if ((!(pte & PTE_V_MASK)) || (!(pte & PTE_R_MASK) && (pte & PTE_W_MASK)))
+    if (!(pte & PTE_V_MASK))
       return -1;
 
-    if (!((pte & PTE_R_MASK) || (pte &  PTE_X_MASK)))
+    if (!((pte & PTE_R_MASK) || (pte & PTE_X_MASK)))
     {
       /* not leaf node */
       base = (pte & ft->pte_ppn_mask) >> 10;
       continue;
     }
  
-    if (state->priv == PRIV_S)
+    if (priv == PRIV_S)
     {
       if ((pte & PTE_U_MASK) && !(state->mstatus & MSTATUS_SUM))
         return -1;
@@ -196,6 +196,30 @@ static int translate_action(cpu_state_t *state, pte_format_t *ft, uint_t *result
 
 static int address_translate(cpu_state_t *state, uint_t inst, uint32_t access, uint_t *result)
 {
+  int priv;
+
+  if ((state->mstatus & MSTATUS_MPRV) && access != PTE_X_MASK)
+  {
+    priv = (state->mstatus >> MSTATUS_MPP_SHIFT) & 3;
+  }
+  else
+  {
+    priv = state->priv;
+  }
+
+  if (priv == PRIV_M)
+  {
+    if (state->xlen < XLEN)
+    {
+      *result = inst & (((uint_t)1 << state->xlen) - 1);
+    }
+    else
+    {
+      *result = inst;
+    }
+    return 0;
+  }
+
 #if XLEN == 32
    uint32_t mode = (state->satp >> 31) & 0x1;
    //uint32_t asid = (state->satp >> 22) & 0x1FF;
@@ -225,7 +249,7 @@ static int address_translate(cpu_state_t *state, uint_t inst, uint32_t access, u
          ft.va_offset = inst & 0xFFF;
          ft.access = access;
          ft.pte_ppn_mask = (((uint32_t)0 - 1) >> 10 << 10);
-         return translate_action(state, &ft, result, access);
+         return translate_action(state, &ft, result, access, priv);
        }
        break;
      case 8: /* Sv39 */
@@ -244,7 +268,7 @@ static int address_translate(cpu_state_t *state, uint_t inst, uint32_t access, u
          ft.va_offset = inst & 0xFFF;
          ft.access = access;
          ft.pte_ppn_mask = (((uint64_t)0 - 1) >> 10 << 20 >> 10);
-         return translate_action(state, &ft, result, access);
+         return translate_action(state, &ft, result, access, priv);
        }
        break;
      case 9: /* Sv48 */
@@ -264,7 +288,7 @@ static int address_translate(cpu_state_t *state, uint_t inst, uint32_t access, u
          ft.va_offset = inst & 0xFFF;
          ft.access = access;
          ft.pte_ppn_mask = (((uint64_t)0 - 1) >> 10 << 20 >> 10);
-         return translate_action(state, &ft, result, access);
+         return translate_action(state, &ft, result, access, priv);
        }
        break;
      default:
@@ -280,26 +304,40 @@ static int_t read_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_
 
   flag = address_translate(state, vaddress, PTE_R_MASK, &phy_address);
   if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_LOAD_PAGE_FAULT;
     return flag;
+  }
 
   if (phy_address == vaddress)
   {
-    return iomap_manager.read(phy_address, size, dst);
+    flag = iomap_manager.read(phy_address, size, dst);
+    goto TAIL_R;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
   {
-    return iomap_manager.read(phy_address, size, dst);
+    flag = iomap_manager.read(phy_address, size, dst);
+    goto TAIL_R;
   }
   else
   {
     uint32_t new_size = PG_MASK + 1 - page_mask; 
-    if (iomap_manager.read(phy_address, new_size, dst) < 0)
-      return -1;
+    if ((flag = iomap_manager.read(phy_address, new_size, dst)) < 0)
+      goto TAIL_R;
     vaddress += new_size;
     dst += new_size;
-    return read_vaddr(state, vaddress, size - new_size, dst);
+    flag = read_vaddr(state, vaddress, size - new_size, dst);
   }
+
+TAIL_R:
+  if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_FAULT_LOAD;
+  }
+  return flag;
 }
 
 static int_t write_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_t *src)
@@ -310,26 +348,40 @@ static int_t write_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8
 
   flag = address_translate(state, vaddress, PTE_W_MASK, &phy_address);
   if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_STORE_PAGE_FAULT;
     return flag;
+  }
 
   if (phy_address == vaddress)
   {
-    return iomap_manager.write(phy_address, size, src);
+    flag = iomap_manager.write(phy_address, size, src);
+    goto TAIL_W;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
   {
-    return iomap_manager.write(phy_address, size, src);
+    flag = iomap_manager.write(phy_address, size, src);
+    goto TAIL_W;
   }
   else
   {
     uint32_t new_size = PG_MASK + 1 - page_mask; 
-    if (iomap_manager.write(phy_address, new_size, src) < 0)
-      return -1;
+    if ((flag = iomap_manager.write(phy_address, new_size, src)) < 0)
+      goto TAIL_W;
     vaddress += new_size;
     src += new_size;
-    return write_vaddr(state, vaddress, size - new_size, src);
+    flag = write_vaddr(state, vaddress, size - new_size, src);
   }
+
+TAIL_W:
+  if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_FAULT_STORE;
+  }
+  return flag;
 }
 
 static int_t code_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_t *dst)
@@ -340,26 +392,40 @@ static int_t code_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_
 
   flag = address_translate(state, vaddress, PTE_X_MASK, &phy_address);
   if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_FETCH_PAGE_FAULT;
     return flag;
+  }
 
   if (phy_address == vaddress)
   {
-    return iomap_manager.read(phy_address, size, dst);
+    flag = iomap_manager.read(phy_address, size, dst);
+    goto TAIL;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
   {
-    return iomap_manager.read(phy_address, size, dst);
+    flag = iomap_manager.read(phy_address, size, dst);
+    goto TAIL;
   }
   else
   {
     uint32_t new_size = PG_MASK + 1 - page_mask; 
-    if (iomap_manager.read(phy_address, new_size, dst) < 0)
-      return -1;
+    if ((flag = iomap_manager.read(phy_address, new_size, dst)) < 0)
+      goto TAIL;
     vaddress += new_size;
     dst += new_size;
-    return code_vaddr(state, vaddress, size - new_size, dst);
+    flag = code_vaddr(state, vaddress, size - new_size, dst);
   }
+
+TAIL:
+  if (flag < 0)
+  {
+    state->pending_tval = vaddress;
+    state->pending_exception = CAUSE_FAULT_FETCH;
+  }
+  return flag;
 }
 
 static address_item_t *get_address_item(cpu_state_t *state, uint_t address)

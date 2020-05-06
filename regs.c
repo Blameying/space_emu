@@ -260,6 +260,10 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       break;
     case 0x002: /* frm */
       set_frm(state, val & 7);
+      state->fs = 3;
+      break;
+    case 0x003: /* fcsr */
+      set_frm(state, (val >> 5) & 7);
       state->fflags = val & 0x1f;
       state->fs = 3;
       break;
@@ -528,7 +532,7 @@ void handle_sret(cpu_state_t *state)
 void handle_mret(cpu_state_t *state)
 {
   int mpp, mpie;
-  mpp = (state->mstatus >> MSTATUS_MPP_SHIFT) & 1;
+  mpp = (state->mstatus >> MSTATUS_MPP_SHIFT) & 3;
   mpie = (state->mstatus >> MSTATUS_MPIE_SHIFT) & 1;
   state->mstatus = (state->mstatus & ~(1 << mpp)) | (mpie << mpp);
   state->mstatus |= MSTATUS_MPIE;

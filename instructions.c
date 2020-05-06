@@ -190,21 +190,21 @@ static inline int32_t get_inst_rm(cpu_state_t *state, int32_t rm)
 }
 #endif
 
-uint32_t fetch_inst(cpu_state_t *state)
+uint32_t fetch_inst(cpu_state_t *state, int *f)
 {
   uint32_t inst = 0;
   int flag = 0;
   flag = iomap_manager.code_vaddr(state, state->pc, sizeof(inst), (uint8_t*)&inst);
+  *f = flag;
   if (flag < 0)
   {
-    state->pending_tval = state->pc;
-    state->pending_exception = CAUSE_FAULT_FETCH;
     raise_exception(state, state->pending_exception, state->pending_tval);
     return 0;
   }
   return inst;
 }
 
+#if DEBUG
 static inline void dump_cpu_info(cpu_state_t *s, uint32_t inst)
 {
   #define DUMP_PRINT(a) printf(#a ": 0x%lx, \n", s->a)
@@ -213,6 +213,8 @@ static inline void dump_cpu_info(cpu_state_t *s, uint32_t inst)
   DUMP_PRINT(pc);
   DUMP_PRINT(priv);
   DUMP_PRINT(mxl);
+  DUMP_PRINT(fflags);
+  DUMP_PRINT(frm);
   DUMP_PRINT(mstatus);
   printf("cur_xlen: 0x%lx, \n", s->xlen);
   DUMP_PRINT(mtvec);
@@ -239,6 +241,12 @@ static inline void dump_cpu_info(cpu_state_t *s, uint32_t inst)
   printf("\n}\n");
   #undef DUMP_PRINT
 }
+#else
+static inline void dump_cpu_info(cpu_state_t *s, uint32_t inst)
+{
+  return;
+}
+#endif
 void decode_inst(uint32_t inst)
 {
   uint32_t opcode = inst & 0x7F;
@@ -257,7 +265,6 @@ void decode_inst(uint32_t inst)
   uint32_t rs3;
   int32_t  rm;
 #endif
-  
 
   dump_cpu_info(&cpu_state, inst);
   switch(opcode)
@@ -286,7 +293,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8;
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.fp_reg[rd] = rval | F64_HIGH;
             cpu_state.fs = 3;
           }
@@ -300,7 +307,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8; 
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.regs[rd] = (int32_t)rval;
           }
           break;
@@ -312,7 +319,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8;
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.regs[rd] = (int64_t)rval;
 
           }
@@ -328,7 +335,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8;
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.fp_reg[rd] = rval | F32_HIGH;
             cpu_state.fs = 3;
           }
@@ -343,7 +350,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8;
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&cpu_state.fp_reg[rd]) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #endif
@@ -355,7 +362,7 @@ void decode_inst(uint32_t inst)
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             uint_t val = cpu_state.regs[rd];
             if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&val) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             break;
           }
           break;
@@ -367,7 +374,7 @@ void decode_inst(uint32_t inst)
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             uint_t val = cpu_state.regs[rd];
             if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&val) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #elif FLEN >= 32
@@ -380,7 +387,7 @@ void decode_inst(uint32_t inst)
             rs1 = ((inst >> 7) & 7) | 8;
             uint_t addr = (int_t)(cpu_state.regs[rs1] + imm_I);
             if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&cpu_state.fp_reg[rd]) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #endif
@@ -442,7 +449,7 @@ void decode_inst(uint32_t inst)
                     ((inst >> 2) & 0x10) |
                     ((inst << 1) & 0x40) |
                     ((inst << 4) & 0x180) |
-                    ((inst >> 3) & 0x20);
+                    ((inst << 3) & 0x20);
             imm_I = (imm_I << 22) >> 22;
             if (imm_I == 0)
               goto ERROR_PROCESS;
@@ -520,7 +527,7 @@ void decode_inst(uint32_t inst)
                   ((inst << 2) & 0x400) |
                   ((inst >> 1) & 0x40) |
                   ((inst << 1) & 0x80) |
-                  ((inst >> 2) & 0x08) |
+                  ((inst >> 2) & 0x0E) |
                   ((inst << 3) & 0x20);
           imm_I = (imm_I << 20) >> 20;
           cpu_state.pc = (int_t)(cpu_state.pc + imm_I);
@@ -582,7 +589,7 @@ void decode_inst(uint32_t inst)
                     ((inst << 4) & 0x1C0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.fp_reg[rd] = rval | F64_HIGH;
             cpu_state.fs = 3;
           }
@@ -596,7 +603,7 @@ void decode_inst(uint32_t inst)
                     ((inst << 4) & 0xC0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             if (rd != 0)
               cpu_state.regs[rd] = (int32_t)rval;
           }
@@ -610,7 +617,7 @@ void decode_inst(uint32_t inst)
                     ((inst << 4) & 0x1C0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             if (rd != 0)
               cpu_state.regs[rd] = (int64_t)rval;
           }
@@ -626,7 +633,7 @@ void decode_inst(uint32_t inst)
                     ((inst << 4) & 0xC0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
             cpu_state.fp_reg[rd] = rval | F32_HIGH;
             cpu_state.fs = 3;
           }
@@ -685,7 +692,7 @@ void decode_inst(uint32_t inst)
               ((inst >> 1) & 0x1C0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&cpu_state.fp_reg[rs2]) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #endif
@@ -694,18 +701,18 @@ void decode_inst(uint32_t inst)
             imm_I = ((inst >> 7) & 0x3C) |
               ((inst >> 1) & 0xC0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
-            if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)cpu_state.regs[rs2]) < 0)
-              goto ERROR_PROCESS;
+            if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&cpu_state.regs[rs2]) < 0)
+              goto MMU_EXCEPTION;
           }
           break;
 #if XLEN >= 64
         case 7: /* c.sdsp */
           {
             imm_I = ((inst >> 7) & 0x38) |
-                    ((inst >> 1) & 0x1C);
+                    ((inst >> 1) & 0x1C0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&cpu_state.regs[rs2]) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #elif FLEN >= 32
@@ -717,7 +724,7 @@ void decode_inst(uint32_t inst)
                     ((inst >> 1) & 0xC0);
             uint_t addr = (int_t)(cpu_state.regs[2] + imm_I);
             if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&cpu_state.fp_reg[rs2]) < 0)
-              goto ERROR_PROCESS;
+              goto MMU_EXCEPTION;
           }
           break;
 #endif
@@ -939,6 +946,7 @@ void decode_inst(uint32_t inst)
               default:
                 goto ERROR_PROCESS;
             }
+            break;
           case 0x20:
             switch(funct3)
             {
@@ -987,9 +995,7 @@ void decode_inst(uint32_t inst)
         if (write_flag < 0)
         {
           printf("store data error, addr: %lx\n", (uint64_t)addr);
-          cpu_state.pending_tval = addr;
-          cpu_state.pending_exception = CAUSE_FAULT_STORE;
-          goto Exception;
+          goto MMU_EXCEPTION;
         }
       }
       break;
@@ -1057,9 +1063,7 @@ void decode_inst(uint32_t inst)
         if (read_flag < 0)
         {
           printf("load data error, addr: %lx\n", (uint64_t)addr);
-          cpu_state.pending_tval = addr;
-          cpu_state.pending_exception = CAUSE_FAULT_LOAD;
-          goto Exception;
+          goto MMU_EXCEPTION;
         }
         if (rd != 0)
         {
@@ -1079,7 +1083,7 @@ void decode_inst(uint32_t inst)
             {
               uint32_t fret = 0;
               if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&fret)< 0)
-                goto ERROR_PROCESS;
+                goto MMU_EXCEPTION;
               cpu_state.fp_reg[rd] = fret | F32_HIGH;
             }
             break;
@@ -1088,7 +1092,7 @@ void decode_inst(uint32_t inst)
             {
               uint64_t fret = 0;
               if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&fret)< 0)
-                goto ERROR_PROCESS;
+                goto MMU_EXCEPTION;
               cpu_state.fp_reg[rd] = fret | F64_HIGH;
             }
             break;
@@ -1108,12 +1112,12 @@ void decode_inst(uint32_t inst)
         {
           case 2: /* fsw */
            if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&(cpu_state.fp_reg[rs2])) < 0)
-             goto ERROR_PROCESS; 
+             goto MMU_EXCEPTION; 
            break;
 #if FLEN >= 64
           case 3: /* fsd */
            if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&(cpu_state.fp_reg[rs2])) < 0)
-             goto ERROR_PROCESS; 
+             goto MMU_EXCEPTION; 
            break;
 #endif
           default:
@@ -1783,10 +1787,35 @@ void decode_inst(uint32_t inst)
               }
               break;
             default:
-              goto ERROR_PROCESS;
+              if ((imm_I >> 5) == 0x09)
+              {
+                /* sfence.vma */
+                if (inst & 0x00007F80)
+                  goto ERROR_PROCESS;
+                if (cpu_state.priv == PRIV_U)
+                  goto ERROR_PROCESS;
+                // if (rs1 == 0)
+                // {
+                //   //TODO: tlb flush all 
+                //   void(rs1);
+                // }
+                // else
+                // {
+                //   //TODO: tlb flush vaddr
+                //   void(rs1);
+                // }
+                cpu_state.pc += 4;
+                goto JUMP;
+              }
+              else
+              {
+                goto ERROR_PROCESS;
+              }
           }
+          break;
         case 1: /* csrrw */
           {
+            funct3 &= 3;
             uint_t value = 0;
             int error = 0;
             if (csr_read(&cpu_state, &value, imm_I, true) )
@@ -1810,6 +1839,7 @@ void decode_inst(uint32_t inst)
         case 2: /* csrrs */
         case 3: /* csrrc */
           {
+            funct3 &= 3;
             uint_t value = 0;
             uint_t value2 = cpu_state.regs[rs1];
             int error = 0;
@@ -1844,6 +1874,7 @@ void decode_inst(uint32_t inst)
           break;
         case 5: /* csrrwi */
           {
+            funct3 &= 3;
             uint_t value = 0;
             int error = 0;
             if (csr_read(&cpu_state, &value, imm_I, true))
@@ -1867,6 +1898,7 @@ void decode_inst(uint32_t inst)
         case 6: /* csrrsi */
         case 7: /* csrrci */
           {
+            funct3 &= 3;
             uint_t value = 0;
             uint_t value2 = rs1;
             int error = 0;
@@ -1899,64 +1931,8 @@ void decode_inst(uint32_t inst)
             }
           }
           break;
-        case 0x102: /* sret */
-          {
-            if(inst & 0x000FFF80)
-              goto ERROR_PROCESS;
-            if (cpu_state.priv < PRIV_S)
-              goto ERROR_PROCESS;
-            handle_sret(&cpu_state);
-            goto DONE_INTERP;
-          }
-          break;
-        case 0x302: /* mret */
-          {
-            if(inst & 0x000FFF80)
-              goto ERROR_PROCESS;
-            if (cpu_state.priv < PRIV_M)
-              goto ERROR_PROCESS;
-            handle_mret(&cpu_state);
-            goto DONE_INTERP;
-          }
-          break;
-        case 0x105: /* wfi */
-          if (inst & 0x00007F80)
-            goto ERROR_PROCESS;
-          if (cpu_state.priv == PRIV_U)
-            goto ERROR_PROCESS;
-          if ((cpu_state.mip & cpu_state.mie) == 0)
-          {
-            cpu_state.power_down_flag = true;
-            cpu_state.pc += 4;
-            goto DONE_INTERP;
-          }
-          break;
         default:
-          if ((imm_I >> 5) == 0x09)
-          {
-            /* sfence.vma */
-            if (inst & 0x00007F80)
-              goto ERROR_PROCESS;
-            if (cpu_state.priv == PRIV_U)
-              goto ERROR_PROCESS;
-            // if (rs1 == 0)
-            // {
-            //   //TODO: tlb flush all 
-            //   void(rs1);
-            // }
-            // else
-            // {
-            //   //TODO: tlb flush vaddr
-            //   void(rs1);
-            // }
-            cpu_state.pc += 4;
-            // JUMP INSN
-          }
-          else
-          {
-            goto ERROR_PROCESS;
-          }
-          break;
+          goto ERROR_PROCESS;
       }
       break;
     case OP_FENCE:
@@ -1989,17 +1965,18 @@ void decode_inst(uint32_t inst)
                 case 2: /* lr.w */
                   if (rs2 != 0)
                     goto ERROR_PROCESS;
-                  if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) <= 0)
-                    goto ERROR_PROCESS;
+                  if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
+                    goto MMU_EXCEPTION;
                   value = (int32_t)rval;
                   cpu_state.load_res = addr;
                   break;
                 case 3: /* sc.w */
                   if (cpu_state.load_res == addr)
                   {
-                    if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&cpu_state.regs[rs2]) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&cpu_state.regs[rs2]) < 0)
+                      goto MMU_EXCEPTION;
                     value = 0;
+                    cpu_state.load_res = 0;
                   }
                   else
                   {
@@ -2017,8 +1994,8 @@ void decode_inst(uint32_t inst)
                 case 0x1c: /* amomaxu.w */
                   {
                     uint_t val2;
-                    if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.read_vaddr(&cpu_state, addr, 4, (uint8_t*)&rval) < 0)
+                      goto MMU_EXCEPTION;
                     value = (int32_t)rval;
                     val2 = cpu_state.regs[rs2];
                     switch(funct7)
@@ -2056,8 +2033,8 @@ void decode_inst(uint32_t inst)
                       default:
                         goto ERROR_PROCESS;
                     }
-                    if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&val2) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.write_vaddr(&cpu_state, addr, 4, (uint8_t*)&val2) < 0)
+                      goto MMU_EXCEPTION;
                   }
                   break;
                 default:
@@ -2073,17 +2050,18 @@ void decode_inst(uint32_t inst)
                 case 2: /* lr.d */
                   if (rs2 != 0)
                     goto ERROR_PROCESS;
-                  if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) <= 0)
-                    goto ERROR_PROCESS;
+                  if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
+                    goto MMU_EXCEPTION;
                   value = (int64_t)rval;
                   cpu_state.load_res = addr;
                   break;
                 case 3: /* sc.d */
                   if (cpu_state.load_res == addr)
                   {
-                    if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&cpu_state.regs[rs2]) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&cpu_state.regs[rs2]) < 0)
+                      goto MMU_EXCEPTION;
                     value = 0;
+                    cpu_state.load_res = 0;
                   }
                   else
                   {
@@ -2101,8 +2079,8 @@ void decode_inst(uint32_t inst)
                 case 0x1c: /* amomaxu.w */
                   {
                     uint_t val2;
-                    if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.read_vaddr(&cpu_state, addr, 8, (uint8_t*)&rval) < 0)
+                      goto MMU_EXCEPTION;
                     value = (int64_t)rval;
                     val2 = cpu_state.regs[rs2];
                     switch(funct7)
@@ -2140,8 +2118,8 @@ void decode_inst(uint32_t inst)
                       default:
                         goto ERROR_PROCESS;
                     }
-                    if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&val2) <= 0)
-                      goto ERROR_PROCESS;
+                    if (iomap_manager.write_vaddr(&cpu_state, addr, 8, (uint8_t*)&val2) < 0)
+                      goto MMU_EXCEPTION;
                   }
                   break;
                 default:
@@ -2170,6 +2148,7 @@ ERROR_PROCESS:
   cpu_state.pending_exception = CAUSE_ILLEGAL_INSTRUCTION;
   cpu_state.pending_tval = inst;
 
+MMU_EXCEPTION:
 Exception:
   if (cpu_state.pending_exception >= 0)
   {
@@ -2185,10 +2164,6 @@ void machine_loop()
 {
   fd_set rfds, wfds, efds;
 
-  if (cpu_state.power_down_flag)
-  {
-    exit(1);
-  }
   machine_get_sleep_duration(&cpu_state, MAX_DELAY_TIME);
 
   FD_ZERO(&rfds);
@@ -2221,7 +2196,15 @@ void machine_loop()
 
   cpu_state.pending_exception = -1;
 
-  uint32_t inst = fetch_inst(&cpu_state);
+  if (cpu_state.power_down_flag)
+  {
+    return;
+  }
+
+  int f = 0;
+  uint32_t inst = fetch_inst(&cpu_state, &f);
+  if (f < 0)
+    return;
   decode_inst(inst);
   cpu_state.cycles++;
 }

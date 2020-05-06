@@ -2,6 +2,7 @@
 #include "riscv_definations.h"
 #include "iomap.h"
 #include "regs.h"
+#include "machine.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,8 +21,7 @@ static void htif_cmd_handler(cpu_state_t *state)
   {
     uint8_t buf[1];
     buf[0] = state->htif_tohost & 0xff;
-    /* TODO: console out */
-    (void)buf;
+    riscv_machine.console->cs->write_data(riscv_machine.console->cs->opaque, buf, 1);
     state->htif_tohost =  0;
     state->htif_fromhost = ((uint64_t)device << 56) | ((uint64_t)cmd << 48);
   }
@@ -86,6 +86,16 @@ static int_t htif_write(address_item_t *handler, uint8_t *src, uint_t size, uint
   {
     case 0:
       state->htif_tohost = (state->htif_tohost & ~0xffffffff) | value;
+      if (state->htif_tohost == 1)
+      {
+        printf("ok\n");
+        exit(0);
+      }
+      else
+      {
+        printf("fail\n");
+        exit(1);
+      }
       break;
     case 4:
       state->htif_tohost = (state->htif_tohost & 0xffffffff) | ((uint64_t)value << 32);
