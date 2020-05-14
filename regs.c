@@ -186,7 +186,7 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
       val = state->satp;
       break;
     case 0x300: /* mstatus */
-      val = get_mstatus(state, MSTATUS_MASK);
+      val = get_mstatus(state, (uint_t)-1);
       break;
     case 0x301: /* misa */
       val = state->misa;
@@ -206,9 +206,6 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
       break;
     case 0x306: /* mcounteren */
       val = state->mcounteren;
-      break;
-    case 0x3A0 ... 0x3BF: /* pmpaddr0 */
-      val = 0;
       break;
     case 0x340: /* mscratch */
       val = state->mscratch;
@@ -235,12 +232,18 @@ int csr_read(cpu_state_t *state, uint_t *pval, uint32_t csr, bool will_write)
           goto illegal_instruction;
       val = state->cycles >> 32;
       break;
+    case 0xf11: /* mvendorid */
+    case 0xf12: /* marchid */
+    case 0xf13: /* mimpid */
+      val = 0;
+      break;
     case 0xf14: /* mhartid */
       val = state->mhartid;
       break;
     default:
       illegal_instruction:
-      printf("csr read error, csr address: 0x%016x\n", csr);
+      if (csr != 0xc01 && csr != 0xc81)
+        printf("csr read error, csr address: 0x%016x\n", csr);
       *pval = 0;
       return -1;
   }
@@ -275,7 +278,7 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
       mask = state->mideleg;
       state->mie = (state->mie & ~mask) | (val & mask);
       break;
-    case 105:   /* stvec */
+    case 0x105: /* stvec */
       state->stvec = val;
       break;
     case 0x106: /* scounteren */
@@ -359,8 +362,6 @@ int csr_write(cpu_state_t *state, uint32_t csr, uint_t val)
     case 0x306: /* mcounteren */
       state->mcounteren = val & COUNTEREN_MASK;
       break;
-    case 0x3A0 ... 0x3BF: /* pmp */
-      break;
     case 0x340: /* mscratch */
       state->mscratch = val;
       break;
@@ -439,7 +440,7 @@ void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval)
     /* check stvec mode */
     if ((cause & CAUSE_INTERRUPT) && (state->stvec & 0x3))
     {
-      state->pc = (state->stvec & ~0x3) + (cause & ~CAUSE_INTERRUPT) * 4;
+      state->pc = (state->stvec & ~0x3) + causel * 4;
     }
     else
     {
@@ -460,7 +461,7 @@ void raise_exception(cpu_state_t *state, uint32_t cause, uint_t tval)
     /* check mtvec mode */
     if ((cause & CAUSE_INTERRUPT) && (state->mtvec & 0x3))
     {
-      state->pc = (state->mtvec & ~0x3) + (cause & ~CAUSE_INTERRUPT) * 4;
+      state->pc = (state->mtvec & ~0x3) + causel * 4;
     }
     else
     {

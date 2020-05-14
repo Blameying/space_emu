@@ -18,6 +18,9 @@ static int_t memory_write(address_item_t *handler, uint8_t *src, uint_t size, ui
   {
     return -1;
   }
+// proxy htif for riscv_test
+//  if (dst >= 0x80001000 && dst <= (0x80001000 + HTIF_SIZE) && size <= 8)
+//      return iomap_manager.write(dst - 0x80001000 + HTIF_BASE_ADDR, size, src);
   uint_t pos = dst - handler->start_address;
   
   uint8_t *ptr = &(handler->entity[pos]);
@@ -37,6 +40,9 @@ static int_t memory_read(address_item_t *handler, uint_t src, uint_t size, uint8
     return -1;
   }
 
+// proxy htif for riscv_test
+//  if (src >= 0x80001000 && src <= (0x80001000 + HTIF_SIZE) && size <= 8)
+//      return iomap_manager.write(src - 0x80001000 + HTIF_BASE_ADDR, size, dst);
   uint_t pos = src - handler->start_address;
   uint8_t *ptr = &(handler->entity[pos]);
   for(; size > 0; size--)

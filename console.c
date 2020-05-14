@@ -184,6 +184,7 @@ void virtual_console_device_init(cpu_state_t *state, virtual_io_bus_t *bus)
   vcd = malloc(sizeof(*vcd));
   memset(vcd, 0, sizeof(*vcd));
   vcd->cs = console_init(true);
+  vcd->common.debug = 1;
   virtio_init(state, &console_item, &vcd->common, bus, 3, 4, virtio_console_recv_request);
   vcd->common.device_features = (1 << 0);
   vcd->common.queue[0].manual_recv = true;

@@ -7,12 +7,15 @@
 typedef struct cpu_state cpu_state_t;
 typedef void set_irq_func(cpu_state_t* state, int irq_num, int flag);
 
+#pragma pack(push)
+#pragma pack(1)
 typedef struct
 {
   set_irq_func *set_irq;
   cpu_state_t *opaque;
   int irq_num;
 } irq_signal_t;
+#pragma pack(pop)
 
 static inline void set_irq(irq_signal_t *irq, int level)
 {
@@ -25,6 +28,9 @@ static inline void irq_init(irq_signal_t *irq, set_irq_func *set_irq, cpu_state_
     irq->opaque = opaque;
     irq->irq_num = irq_num;
 }
+
+#pragma pack(push)
+#pragma pack(1)
 
 struct cpu_state
 {
@@ -87,6 +93,8 @@ struct cpu_state
 
   uint_t load_res;
 };
+
+#pragma pack(pop)
 
 extern cpu_state_t cpu_state;
 

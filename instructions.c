@@ -64,10 +64,11 @@ static inline uint_t mulh(int_t a, int_t b)
 {
   uint_t r1;
   r1 = mulhu(a, b);
+
   if (a < 0)
-    r1 -= a;
-  if (b < 0)
     r1 -= b;
+  if (b < 0)
+    r1 -= a;
   return r1;
 }
 
@@ -76,7 +77,7 @@ static inline uint_t mulhsu(int_t a, uint_t b)
   uint_t r1;
   r1 = mulhu(a, b);
   if (a < 0)
-    r1 -= a;
+    r1 -= b;
   return r1;
 }
 
@@ -1722,7 +1723,7 @@ void decode_inst(uint32_t inst)
     case OP_JALR: /* jalr */
       {
         uint_t val = cpu_state.pc + 4;
-        cpu_state.pc = cpu_state.regs[rs1] + imm_I;
+        cpu_state.pc = (int_t)(cpu_state.regs[rs1] + imm_I) & ~1;
         if (rd != 0)
         {
           cpu_state.regs[rd] = val;
@@ -1778,6 +1779,8 @@ void decode_inst(uint32_t inst)
                   goto ERROR_PROCESS;
                 if (cpu_state.priv == PRIV_U)
                   goto ERROR_PROCESS;
+                if ((cpu_state.priv < PRIV_M) && (cpu_state.mstatus & MSTATUS_TW))
+                  goto ERROR_PROCESS;
                 if ((cpu_state.mip & cpu_state.mie) == 0)
                 {
                   cpu_state.power_down_flag = true;
@@ -1818,7 +1821,7 @@ void decode_inst(uint32_t inst)
             funct3 &= 3;
             uint_t value = 0;
             int error = 0;
-            if (csr_read(&cpu_state, &value, imm_I, true) )
+            if (csr_read(&cpu_state, &value, imm_I, true))
               goto ERROR_PROCESS;
             value = (int_t)value;
             error = csr_write(&cpu_state, imm_I, cpu_state.regs[rs1]);
@@ -2144,7 +2147,7 @@ C_NEXT_INSN:
   return;
 
 ERROR_PROCESS:
-  printf("Error instructions decode! 0x%x, cycles: %lu\n", inst, cpu_state.cycles);
+//  printf("Error instructions decode! 0x%x, cycles: %lu\n", inst, cpu_state.cycles);
   cpu_state.pending_exception = CAUSE_ILLEGAL_INSTRUCTION;
   cpu_state.pending_tval = inst;
 

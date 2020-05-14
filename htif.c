@@ -40,7 +40,7 @@ static int htif_init(address_item_t *handler)
   return true;
 }
 
-static int_t htif_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+static int_t htif_read_sub(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
 {
   if (handler == NULL || dst == NULL)
     return -1;
@@ -72,8 +72,26 @@ static int_t htif_read(address_item_t *handler, uint_t src, uint_t size, uint8_t
   return size;
 }
 
+static int_t htif_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+{
+  if (size != 4 && size != 8)
+    return -1;
+  uint_t len = size;
+  int_t  ret_size = 0;
+  while(len >= 4)
+  {
+    ret_size += htif_read_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    len -= 4;
+  }
+  if (ret_size != size)
+    return -1;
+  else
+    return size;
+}
 
-static int_t htif_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+static int_t htif_write_sub(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
 {
   if (handler == NULL || src == NULL)
     return -1;
@@ -89,11 +107,6 @@ static int_t htif_write(address_item_t *handler, uint8_t *src, uint_t size, uint
       if (state->htif_tohost == 1)
       {
         printf("ok\n");
-        exit(0);
-      }
-      else
-      {
-        printf("fail\n");
         exit(1);
       }
       break;
@@ -112,6 +125,26 @@ static int_t htif_write(address_item_t *handler, uint8_t *src, uint_t size, uint
   }
 
   return 4;
+}
+
+
+static int_t htif_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+{
+  if (size != 4 && size != 8)
+    return -1;
+  uint_t len = size;
+  int_t  ret_size = 0;
+  while(len >= 4)
+  {
+    ret_size += htif_write_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    len -= 4;
+  }
+  if (ret_size != size)
+    return -1;
+  else
+    return size;
 }
 
 static void htif_release(address_item_t *handler)

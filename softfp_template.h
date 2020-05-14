@@ -808,6 +808,15 @@ F_UINT glue(max_sf, F_SIZE)(F_UINT a, F_UINT b, uint32_t *pfflags)
     if (isnan_sf(a) || isnan_sf(b)) {
         if (issignan_sf(a) || issignan_sf(b)) {
             *pfflags |= FFLAG_INVALID_OP;
+            // new changes in the spec after 2.2
+            if (!issignan_sf(a))
+            {
+              return a;
+            }
+            else if (!issignan_sf(b))
+            {
+              return b;
+            }
             return F_QNAN;
         } else if (isnan_sf(a)) {
             if (isnan_sf(b)) 

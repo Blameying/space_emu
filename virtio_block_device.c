@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "cutils.h"
 
 static int64_t bf_get_sector_count(block_device_t *bs)
 {
@@ -166,12 +167,9 @@ void virtual_block_device_init(cpu_state_t *state, const char *filename, block_d
   virtio_init(state, &block_item, &vbd->common, bus, 2, 8, virtual_block_recv_request);
 
   nb_sectors = vbd->bs->get_sector_count(vbd->bs);
-  uint8_t *ptr = vbd->common.config_space;
-  int i;
-  for (i = 0; i < 8; i++)
-  {
-    ptr[i] = nb_sectors >> (i * 8);
-  }
+  put_le32(vbd->common.config_space, nb_sectors);
+  put_le32(vbd->common.config_space + 4, nb_sectors >> 32);
+
   riscv_machine.block = vbd;
 
   return;

@@ -91,7 +91,7 @@ static int_t write_bytes(uint_t address, uint_t size, uint8_t *src)
     }
   }
 
-  return 0;
+  return -1;
 }
 
 static int_t read_bytes(uint_t address, uint_t size, uint8_t *dst)
@@ -109,7 +109,7 @@ static int_t read_bytes(uint_t address, uint_t size, uint8_t *dst)
     }
   }
 
-  return 0;
+  return -1;
 }
 
 typedef struct pte_format
@@ -177,13 +177,21 @@ static int translate_action(cpu_state_t *state, pte_format_t *ft, uint_t *result
     /* superpage */
     if (i > 0)
     {
+      /* If i >0 andpte.ppn[i−1 : 0] != 0, this is a misaligned superpage; 
+       * stop and raise a page-faultexception corresponding to the original access type
+       */
+      if (((pte & ft->pte_ppn_mask) >> 10) & ((1 << (ft->ppn_width * i)) - 1))
+      {
+        return -1;
+      }
+
       *result = 0;
       int j = 0;
       for (j = 0; j < i; j++)
       {
         *result |= (ft->vpn[j] << (ft->ppn_width * j));
       }
-      *result <<= 10;
+      *result <<= 12;
       ft->pte_ppn_mask = (ft->pte_ppn_mask >> (10 + ft->ppn_width * i) << (10 + ft->pte_ppn_mask * i));
     }
 
@@ -313,7 +321,12 @@ static int_t read_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_
   if (phy_address == vaddress)
   {
     flag = iomap_manager.read(phy_address, size, dst);
-    goto TAIL_R;
+    if (flag < 0)
+    {
+      state->pending_tval = vaddress;
+      state->pending_exception = CAUSE_FAULT_LOAD;
+    }
+    return flag;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
@@ -335,7 +348,7 @@ TAIL_R:
   if (flag < 0)
   {
     state->pending_tval = vaddress;
-    state->pending_exception = CAUSE_FAULT_LOAD;
+    state->pending_exception = CAUSE_LOAD_PAGE_FAULT;
   }
   return flag;
 }
@@ -357,7 +370,12 @@ static int_t write_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8
   if (phy_address == vaddress)
   {
     flag = iomap_manager.write(phy_address, size, src);
-    goto TAIL_W;
+    if (flag < 0)
+    {
+      state->pending_tval = vaddress;
+      state->pending_exception = CAUSE_FAULT_STORE;
+    }
+    return flag;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
@@ -379,7 +397,7 @@ TAIL_W:
   if (flag < 0)
   {
     state->pending_tval = vaddress;
-    state->pending_exception = CAUSE_FAULT_STORE;
+    state->pending_exception = CAUSE_STORE_PAGE_FAULT;
   }
   return flag;
 }
@@ -401,7 +419,12 @@ static int_t code_vaddr(cpu_state_t *state, uint_t vaddress, uint_t size, uint8_
   if (phy_address == vaddress)
   {
     flag = iomap_manager.read(phy_address, size, dst);
-    goto TAIL;
+    if (flag < 0)
+    {
+      state->pending_tval = vaddress;
+      state->pending_exception = CAUSE_FAULT_FETCH;
+    }
+    return flag;
   }
 
   if ((PG_MASK - page_mask + 1) >= size)
@@ -423,7 +446,7 @@ TAIL:
   if (flag < 0)
   {
     state->pending_tval = vaddress;
-    state->pending_exception = CAUSE_FAULT_FETCH;
+    state->pending_exception = CAUSE_FETCH_PAGE_FAULT;
   }
   return flag;
 }

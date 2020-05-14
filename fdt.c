@@ -10,18 +10,8 @@
 #include <byteswap.h>
 #include <assert.h>
 #include "fdt.h"
+#include "cutils.h"
 
-#ifdef WORDS_BIGENDIAN
-static inline uint32_t cpu_to_be32(uint32_t v)
-{
-    return v;
-}
-#else
-static inline uint32_t cpu_to_be32(uint32_t v)
-{
-    return bswap_32(v);
-}
-#endif
 
 #define FDT_MAGIC 0xd00dfeed
 #define FDT_VERSION 17
@@ -77,11 +67,6 @@ static fdt_state_t *fdt_init(void)
   return fdt_s;
 }
 
-static inline int max_int(int a, int b)
-{
-  return a > b ? a : b;
-}
-
 static void fdt_alloc_len(fdt_state_t *fdt_s, int len)
 {
   int new_size;
@@ -97,7 +82,7 @@ static void fdt_alloc_len(fdt_state_t *fdt_s, int len)
 static void fdt_put32(fdt_state_t *fdt_s, uint32_t value)
 {
   fdt_alloc_len(fdt_s, fdt_s->tab_len + 1);
-  fdt_s->tab[fdt_s->tab_len++] = value;
+  fdt_s->tab[fdt_s->tab_len++] = cpu_to_be32(value);
 }
 
 static void fdt_put_data(fdt_state_t *fdt_s, const uint8_t *data, int len)
@@ -340,7 +325,7 @@ int build_fdt(cpu_state_t *state, uint8_t *dst, uint64_t kernel_start, uint64_t 
   for (i = 0; i < 26; i++)
   {
     if (misa & (1 << i))
-      *q++ = 'a' + 1;
+      *q++ = 'a' + i;
   }
 
   *q = '\0';
@@ -429,7 +414,27 @@ int build_fdt(cpu_state_t *state, uint8_t *dst, uint64_t kernel_start, uint64_t 
   fdt_end_node(fdt_s); /* chosen */
   fdt_end_node(fdt_s); /* / */
 
-  size = fdt_output(fdt_s, dst);
+#if 1
+  {
+    FILE *f;
+    f = fopen("../tinyemu/riscvemu.dtb", "rb");
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    fread(dst, 1, size, f);
+    fclose(f);
+  }
+#endif
+
+  //size = fdt_output(fdt_s, dst);
+#if 1
+  {
+    FILE *f;
+    f = fopen("./riscvemu.dtb", "wb");
+    fwrite(dst, 1, size, f);
+    fclose(f);
+  }
+#endif
   fdt_free(fdt_s);
 
   return size;

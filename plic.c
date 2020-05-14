@@ -3,6 +3,7 @@
 #include "iomap.h"
 #include "regs.h"
 #include <stddef.h>
+#include "cutils.h"
 
 #define PLIC_HART_BASE 0x200000
 #define PLIC_HART_SIZE 0x1000
@@ -35,7 +36,7 @@ static int plic_init(address_item_t *handler)
   return true;
 }
 
-static int_t plic_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+static int_t plic_read_sub(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
 {
   if (handler == NULL || dst == NULL)
   {
@@ -58,12 +59,7 @@ static int_t plic_read(address_item_t *handler, uint_t src, uint_t size, uint8_t
       {
         uint32_t mask = state->plic_pending_irq & ~state->plic_served_irq;
         if (mask != 0) {
-          int i = 0;
-          for (; i < 32; i++)
-          {
-            if ((mask >> i) & 1)
-              break;
-          }
+          int i = ctz32(mask);
           state->plic_served_irq |= 1 << i;
           plic_update_mip(state);
           result = i + 1;
@@ -80,11 +76,29 @@ static int_t plic_read(address_item_t *handler, uint_t src, uint_t size, uint8_t
   }
   uint32_t *ptr = (uint32_t*)dst;
   *ptr = result;
-  return 0;
+  return 4;
 }
 
+static int_t plic_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += plic_read_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
+  }
 
-static int_t plic_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+  return size;
+}
+
+static int_t plic_write_sub(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
 {
   if (handler == NULL || src == NULL)
   {
@@ -95,7 +109,7 @@ static int_t plic_write(address_item_t *handler, uint8_t *src, uint_t size, uint
     return -1;
   }
   uint_t offset = dst - handler->start_address;
-  uint32_t value = *(uint32_t*)dst;
+  uint32_t value = *(uint32_t*)src;
   cpu_state_t *state = handler->cpu_state;
   switch(offset)
   {
@@ -110,7 +124,26 @@ static int_t plic_write(address_item_t *handler, uint8_t *src, uint_t size, uint
     default:
       break;
   }
-  return 0;
+  return 4;
+}
+
+static int_t plic_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += plic_write_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
+  }
+
+  return size;
 }
 
 static void plic_release(address_item_t *handler)

@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include "machine.h"
 
-const char *bios_path = "./images/out.bin";
+const char *bios_path = "./images/bbl64.bin";
 const char *kernel_path = "./images/kernel-riscv64.bin";
 const char *device = "./images/root-riscv64.bin";
 const char *cmdline = "console=hvc0 root=/dev/vda rw";
@@ -188,12 +188,12 @@ int main(int argc, char *argv[])
   memset(bus, 0, sizeof(*bus));
   bus->addr = VIRTIO_BASE_ADDR;
   bus->irq = &cpu_state.plic_irq[irq_num++];
-  virtual_block_device_init(&cpu_state, device, BF_MODE_SNAPSHOT, bus);
+  virtual_console_device_init(&cpu_state, bus);
 
   /* change addr and irq for next devie */
   bus->addr += VIRTIO_SIZE;
   bus->irq = &cpu_state.plic_irq[irq_num++];
-  virtual_console_device_init(&cpu_state, bus);
+  virtual_block_device_init(&cpu_state, device, BF_MODE_SNAPSHOT, bus);
 
   if (argc > 1)
   {

@@ -2,7 +2,7 @@ objects = space.o clint.o fdt.o htif.o instructions.o iomap.o	\
 						memory.o plic.o regs.o virtio_interface.o virtio_block_device.o	\
 						machine.o console.o softfp.o cutils.o debug.o
 cc = gcc
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall -DDEBUG_VIRTIO
 
 space: $(objects)
 	cc $(cflags) -o space $(objects)

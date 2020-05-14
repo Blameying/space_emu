@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "cutils.h"
 
 
 static void virtual_io_reset(virtual_io_device_t *device)
@@ -28,11 +29,6 @@ static void virtual_io_reset(virtual_io_device_t *device)
     qs->used_addr = 0;
     qs->last_avail_idx = 0;
   }
-}
-
-static inline int min_int(int a, int b)
-{
-  return a < b? a:b;
 }
 
 static int virtio_memcpy_from_ram(virtual_io_device_t *device, uint8_t *buf, uint_t addr, int count)
@@ -238,8 +234,7 @@ static uint32_t virtual_config_read(virtual_io_device_t *device, uint32_t offset
     case 2:
       if (offset < (device->config_space_size - 1))
       {
-        uint8_t *ptr = (uint8_t*)&device->config_space[offset];
-        value = ptr[0] | ptr[1] << 8;
+        value = get_le16(&device->config_space[offset]);
       }
       else
       {
@@ -249,8 +244,7 @@ static uint32_t virtual_config_read(virtual_io_device_t *device, uint32_t offset
     case 4:
       if (offset < (device->config_space_size - 3))
       {
-        uint8_t *ptr = (uint8_t*)(device->config_space + offset);
-        value = ptr[0] | ptr[1] << 8 | ptr[2] << 16 | ptr[3] << 24;
+        value = get_le32(device->config_space + offset);
       }
       else
       {
@@ -302,7 +296,7 @@ static void virtual_config_write(virtual_io_device_t *device, uint32_t offset , 
   }
 }
 
-int_t virtual_mmio_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+int_t virtual_mmio_read_sub(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
 {
   if (handler == NULL || dst == NULL)
     return -1;
@@ -394,11 +388,34 @@ int_t virtual_mmio_read(address_item_t *handler, uint_t src, uint_t size, uint8_
   {
     value = 0;
   }
-
+#if DEBUG_VIRTIO
+  if (device->debug)
+    printf("virtio_mmio_read: offset=0x%x, val=0x%x, size=%lu\n",
+          offset, value, size);
+#endif
   uint8_t *ptr = (uint8_t*)&value;
   for (i = 0; i < size; i++)
   {
     *dst++ = *ptr++;
+  }
+
+  return size;
+}
+
+int_t virtual_mmio_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += virtual_mmio_read_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
   }
 
   return size;
@@ -414,9 +431,11 @@ static void set_high32(uint64_t *addr, uint32_t value)
   *addr = (*addr & 0xffffffff) | ((uint64_t)value << 32);
 }
 
-int_t virtual_mmio_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+int_t virtual_mmio_write_sub(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
 {
   if (handler == NULL || src == NULL)
+    return -1;
+  if (size != 4)
     return -1;
   virtual_io_device_t *device = (virtual_io_device_t*)(handler->entity);
   uint32_t offset = dst - handler->start_address;
@@ -490,6 +509,30 @@ int_t virtual_mmio_write(address_item_t *handler, uint8_t *src, uint_t size, uin
         }
         break;
     }
+#if DEBUG_VIRTIO
+    if (device->debug)
+        printf("virtio_mmio_write: offset=0x%x, val=0x%x, size=%lu\n",
+               offset, value, size);
+#endif
+  }
+
+  return size;
+}
+
+int_t virtual_mmio_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += virtual_mmio_write_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
   }
 
   return size;
@@ -716,7 +759,7 @@ void virtio_init(cpu_state_t *state, address_item_t *handler,
     int config_space_size,
     virtual_io_device_recieve_func *device_recv)
 {
-  memset(device, 0, sizeof(*device));
+  memset(device, 0, sizeof(virtual_io_device_t));
   device->irq = bus->irq;
   device->device_id = device_id;
   device->vendor_id = 0xffff;

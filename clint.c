@@ -25,7 +25,7 @@ static int clint_init(address_item_t *handler)
   return true;
 }
 
-static int_t clint_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+static int_t clint_read_sub(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
 {
   if (handler == NULL || dst == NULL)
     return -1;
@@ -51,7 +51,8 @@ static int_t clint_read(address_item_t *handler, uint_t src, uint_t size, uint8_
       result = handler->cpu_state->mtimecmp >> 32;
       break;
     default:
-      return -1;
+      result = 0;
+      break;
   }
   uint8_t *ptr = (uint8_t*)&result;
   int i = 0;
@@ -62,8 +63,26 @@ static int_t clint_read(address_item_t *handler, uint_t src, uint_t size, uint8_
   return 4;
 }
 
+static int_t clint_read(address_item_t *handler, uint_t src, uint_t size, uint8_t *dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += clint_read_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
+  }
 
-static int_t clint_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+  return size;
+}
+
+static int_t clint_write_sub(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
 {
   if (handler == NULL || src == NULL)
     return -1;
@@ -83,9 +102,28 @@ static int_t clint_write(address_item_t *handler, uint8_t *src, uint_t size, uin
       reset_mip(state, MIP_MTIP);
       break;
     default:
-      return -1;
+      break;
   }
   return 4;
+}
+
+static int_t clint_write(address_item_t *handler, uint8_t *src, uint_t size, uint_t dst)
+{
+  int_t ret_size = 0;
+  uint_t cp_size = size;
+  while(cp_size >= 4)
+  {
+    ret_size += clint_write_sub(handler, src, 4, dst);
+    src += 4;
+    dst += 4;
+    cp_size -= 4;
+  }
+  if (ret_size != size)
+  {
+    return -1;
+  }
+
+  return size;
 }
 
 static void clint_release(address_item_t *handler)
