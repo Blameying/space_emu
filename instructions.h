@@ -1,6 +1,9 @@
 #ifndef __INSTRUCTIONS_H__
 #define __INSTRUCTIONS_H__
 
+#include <stdint.h>
+#include "regs.h"
+
 #define OP_REG 0x33
 #define OP_IMM 0x13
 #define OP_STORE 0x23
@@ -23,5 +26,7 @@
 #define OP_FP_FNMADD 0x4f
 #define OP_FP_NORMAL 0x53
 
+extern uint32_t fetch_inst(cpu_state_t *state, int *f);
+extern void decode_debug(cpu_state_t *state, uint32_t inst);
 extern void machine_loop();
 #endif

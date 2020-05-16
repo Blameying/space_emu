@@ -37,7 +37,7 @@ static int virtio_memcpy_from_ram(virtual_io_device_t *device, uint8_t *buf, uin
   while(count > 0)
   {
     len = min_int(count, VIRTIO_PAGE_SIZE - (addr & (VIRTIO_PAGE_SIZE - 1)));
-    iomap_manager.read_vaddr(device->cpu_state, addr, len, buf);
+    iomap_manager.read(addr, len, buf);
     addr += len;
     buf += len;
     count -= len;
@@ -51,7 +51,7 @@ static int virtio_memcpy_to_ram(virtual_io_device_t *device, uint_t addr, const 
   while(count > 0)
   {
     len = min_int(count, VIRTIO_PAGE_SIZE - (addr & (VIRTIO_PAGE_SIZE - 1)));
-    iomap_manager.write_vaddr(device->cpu_state, addr, len, (uint8_t*)buf);
+    iomap_manager.write(addr, len, (uint8_t*)buf);
     addr += len;
     buf += len;
     count -= len;
@@ -197,18 +197,28 @@ static void queue_notify(virtual_io_device_t *device, int queue_idx)
   if (qs->manual_recv)
     return;
 
-  int_t status = iomap_manager.read_vaddr(device->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  int_t status = iomap_manager.read(qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
   if (status < 0)
   {
     abort();
   }
   while(qs->last_avail_idx != avail_idx)
   {
-    status = iomap_manager.read_vaddr(device->cpu_state, qs->avail_addr + 4 + (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
+    status = iomap_manager.read(qs->avail_addr + 4 + (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
     if (status < 0)
-      abort();
+    {
+      printf("desc_idx fetch failed\n");
+      desc_idx = 0;
+    }
     if (!get_desc_rw_size(device->cpu_state, device, &read_size, &write_size, queue_idx, desc_idx))
     {
+#ifdef DEBUG_VIRTIO
+      if (device->debug)
+      {
+        printf("queue_notify: idx=%d, read_size=%d, write_size=%d\n",
+               queue_idx, read_size, write_size);
+      }
+#endif
       if (device->device_recv(device, queue_idx, desc_idx, read_size, write_size) < 0)
         break;
     }
@@ -272,9 +282,7 @@ static void virtual_config_write(virtual_io_device_t *device, uint32_t offset , 
     case 2:
       if (offset < device->config_space_size - 1)
       {
-        uint8_t *ptr = (uint8_t*)(device->config_space + offset);
-        ptr[0] = value;
-        ptr[1] = value >> 8;
+        put_le16(device->config_space + offset, value);
         if (device->config_write)
           device->config_write(device);
       }
@@ -282,17 +290,11 @@ static void virtual_config_write(virtual_io_device_t *device, uint32_t offset , 
     case 4:
       if (offset < device->config_space_size - 3)
       {
-        uint8_t *ptr = (uint8_t*)(device->config_space + offset);
-        ptr[0] = value;
-        ptr[1] = value >> 8;
-        ptr[2] = value >> 16;
-        ptr[3] = value >> 24;
+        put_le32(device->config_space + offset, value);
         if (device->config_write)
           device->config_write(device);
       }
       break;
-    default:
-      abort();
   }
 }
 
@@ -388,7 +390,7 @@ int_t virtual_mmio_read_sub(address_item_t *handler, uint_t src, uint_t size, ui
   {
     value = 0;
   }
-#if DEBUG_VIRTIO
+#ifdef DEBUG_VIRTIO
   if (device->debug)
     printf("virtio_mmio_read: offset=0x%x, val=0x%x, size=%lu\n",
           offset, value, size);
@@ -449,6 +451,7 @@ int_t virtual_mmio_write_sub(address_item_t *handler, uint8_t *src, uint_t size,
   if (offset >= VIRTIO_MMIO_CONFIG)
   {
     virtual_config_write(device, offset - VIRTIO_MMIO_CONFIG, value, size);
+    return size;
   }
 
   if (size == 4)
@@ -509,7 +512,7 @@ int_t virtual_mmio_write_sub(address_item_t *handler, uint8_t *src, uint_t size,
         }
         break;
     }
-#if DEBUG_VIRTIO
+#ifdef DEBUG_VIRTIO
     if (device->debug)
         printf("virtio_mmio_write: offset=0x%x, val=0x%x, size=%lu\n",
                offset, value, size);
@@ -545,14 +548,14 @@ void virtual_consume_desc(virtual_io_device_t *device, int queue_idx, int desc_i
   uint32_t index = 0;
 
   addr = qs->used_addr + 2;
-  iomap_manager.read_vaddr(device->cpu_state, addr, 2, (uint8_t*)&index);
+  iomap_manager.read(addr, 2, (uint8_t*)&index);
   index += 1;
-  iomap_manager.write_vaddr(device->cpu_state, addr, 2, (uint8_t*)&index);
+  iomap_manager.write(addr, 2, (uint8_t*)&index);
   index -= 1;
 
   addr = qs->used_addr + 4 + (index & (qs->num - 1)) * 8;
-  iomap_manager.write_vaddr(device->cpu_state, addr, 4, (uint8_t*)&desc_idx);
-  iomap_manager.write_vaddr(device->cpu_state, addr + 4, 4, (uint8_t*)&desc_len);
+  iomap_manager.write(addr, 4, (uint8_t*)&desc_idx);
+  iomap_manager.write(addr + 4, 4, (uint8_t*)&desc_len);
 
   device->int_status |= 1;
   set_irq(device->irq, 1);
@@ -693,10 +696,10 @@ int virtio_console_get_write_len(virtual_io_device_t *dev)
   
   if (!qs->ready)
     return 0;
-  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  iomap_manager.read(qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
   if (qs->last_avail_idx == avail_idx)
     return 0;
-  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 4 + \
+  iomap_manager.read(qs->avail_addr + 4 + \
                           (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
   if (get_desc_rw_size(dev->cpu_state, dev, &read_size, &write_size, queue_idx, desc_idx))
   {
@@ -715,7 +718,7 @@ bool virtio_console_can_write_data(virtual_io_device_t *dev)
   {
     return false;
   }
-  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  iomap_manager.read(qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
   return qs->last_avail_idx != avail_idx;
 }
 
@@ -728,10 +731,10 @@ int virtio_console_write_data(virtual_io_device_t *dev, const uint8_t *buf, int 
 
   if (!qs->ready)
     return 0;
-  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
+  iomap_manager.read(qs->avail_addr + 2, 2, (uint8_t*)&avail_idx);
   if (qs->last_avail_idx == avail_idx)
     return 0;
-  iomap_manager.read_vaddr(dev->cpu_state, qs->avail_addr + 4 + \
+  iomap_manager.read(qs->avail_addr + 4 + \
                            (qs->last_avail_idx & (qs->num - 1)) * 2, 2, (uint8_t*)&desc_idx);
   virtual_memcpy_to_queue(dev, queue_idx, desc_idx, 0, buf, buf_len);
   virtual_consume_desc(dev, queue_idx, desc_idx, buf_len);

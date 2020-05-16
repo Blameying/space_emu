@@ -166,6 +166,7 @@ void virtual_block_device_init(cpu_state_t *state, const char *filename, block_d
   vbd->bs = block_device_init(filename, mode);
   virtio_init(state, &block_item, &vbd->common, bus, 2, 8, virtual_block_recv_request);
 
+  vbd->common.debug = 1;
   nb_sectors = vbd->bs->get_sector_count(vbd->bs);
   put_le32(vbd->common.config_space, nb_sectors);
   put_le32(vbd->common.config_space + 4, nb_sectors >> 32);

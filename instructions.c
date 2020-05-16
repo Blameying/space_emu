@@ -248,6 +248,41 @@ static inline void dump_cpu_info(cpu_state_t *s, uint32_t inst)
   return;
 }
 #endif
+void decode_debug(cpu_state_t *state, uint32_t inst)
+{
+  uint32_t opcode = inst & 0x7F;
+  uint32_t rd = (inst >> 7) & 0x1F;
+  uint32_t funct3 = (inst >> 12) & 0x07;
+  uint32_t rs1 = (inst >> 15) & 0x1F;
+  uint32_t rs2 = (inst >> 20) & 0x1F;
+  uint32_t funct7 = (inst >> 25) & 0x7F;
+  int32_t  imm_I = (int32_t)inst >> 20;
+  int32_t  imm_S = ((int32_t)(rd | ((inst >> 20) & 0xFE0)) << 20) >> 20;
+  int32_t  imm_B = ((int32_t)(((inst >> 7) & 0x1E) | ((inst >> 20) & 0x7E0) | ((inst << 4) & 0x800) | ((inst >> 19) & 0x1000)) << 19) >> 19;
+  int32_t  imm_U = (int32_t)(inst & 0xFFFFF000);
+  int32_t  imm_J = ((int32_t)(((inst >> 20) & 0x7FE) | ((inst >> 9) & 0x800) | (inst & 0xFF000) | ((inst >> 11) & 0x100000)) << 11) >> 11;
+  switch(opcode)
+  {
+    C_QUADRANT(0)
+      funct3 = (inst >> 13) & 7;
+      rd = ((inst >> 2) & 7) | 8;
+      state->pc += 2;
+      break;
+    C_QUADRANT(1)
+      funct3 = (inst >> 13) & 7;
+      state->pc += 2;
+      break;
+    C_QUADRANT(2)
+      funct3 = (inst >> 13) & 7;
+      rs2 = (inst >> 2) & 0x1F;
+      state->pc += 2;
+      break;
+    default:
+      state->pc += 4;
+  }
+  printf("opcode: 0x%x, rd: 0x%x, funct3: 0x%x\n", opcode, rd, funct3);
+}
+
 void decode_inst(uint32_t inst)
 {
   uint32_t opcode = inst & 0x7F;
@@ -2166,17 +2201,19 @@ JUMP:
 void machine_loop()
 {
   fd_set rfds, wfds, efds;
+  int stdin_fd, fd_max, ret, delay;
+  struct timeval tv;
 
-  machine_get_sleep_duration(&cpu_state, MAX_DELAY_TIME);
+  delay = machine_get_sleep_duration(&cpu_state, MAX_DELAY_TIME);
 
   FD_ZERO(&rfds);
   FD_ZERO(&wfds);
   FD_ZERO(&efds);
-
+  fd_max = -1;
   if (virtio_console_can_write_data((virtual_io_device_t*)riscv_machine.console))
   {
     stdio_device_t *stdio_device = riscv_machine.console->cs->opaque;
-    int stdin_fd = stdio_device->stdin_fd;
+    stdin_fd = stdio_device->stdin_fd;
     FD_SET(stdin_fd, &rfds);
     
     if (stdio_device->resize_pending)
@@ -2188,6 +2225,24 @@ void machine_loop()
     }
   }
 
+  tv.tv_sec = delay / 1000;
+  tv.tv_usec = (delay % 1000) * 1000;
+  ret = select(fd_max + 1, &rfds, &wfds, &efds, &tv);
+  if (ret > 0)
+  {
+    if (riscv_machine.console && FD_ISSET(stdin_fd, &rfds))
+    {
+      uint8_t buf[128];
+      int ret, len;
+      len = virtio_console_get_write_len(&(riscv_machine.console->common));
+      len = min_int(len, sizeof(buf));
+      ret = riscv_machine.console->cs->read_data(riscv_machine.console->cs->opaque, buf, len);
+      if (ret > 0)
+      {
+        virtio_console_write_data(&(riscv_machine.console->common), buf, ret);
+      }
+    }
+  }
   // check interrupts
   if ((cpu_state.mip & cpu_state.mie) != 0)
   {
